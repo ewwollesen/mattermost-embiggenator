@@ -1,0 +1,18 @@
+users: 500
+groups: 20
+members_per_group: 10-50
+email_domain: planetexpress.com
+default_password: password
+password_scheme: "{SSHA}"
+seed: 42
+
+abac:
+  attributes:
+    - name: departmentNumber
+      values: ["Engineering", "Sales", "Support", "Marketing", "Finance"]
+    - name: businessCategory
+      values: ["Public", "Confidential", "Secret"]
+      weights: [50, 30, 20]
+    - name: employeeType
+      values: ["Full-Time", "Part-Time", "Contractor", "Intern"]
+      weights: [60, 15, 15, 10]
