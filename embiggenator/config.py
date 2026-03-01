@@ -26,6 +26,24 @@ class AbacAttribute:
             )
 
 
+DEFAULT_ABAC_ATTRIBUTES = [
+    AbacAttribute(
+        name="businessCategory",
+        values=["IL4", "IL5", "IL6"],
+        weights=[50, 35, 15],
+    ),
+    AbacAttribute(
+        name="departmentNumber",
+        values=["Engineering", "Sales", "Support", "Finance", "HR"],
+    ),
+    AbacAttribute(
+        name="employeeType",
+        values=["Full-Time", "Contractor", "Intern"],
+        weights=[70, 20, 10],
+    ),
+]
+
+
 @dataclass
 class Config:
     """Resolved configuration for a generation run."""
@@ -171,13 +189,21 @@ def build_config(
     if no_defaults:
         cfg.include_defaults = False
 
-    # ABAC from profile file
+    # ABAC: use custom attributes if any are specified, otherwise use defaults
+    custom_abac: list[AbacAttribute] = []
+
     if abac_profile:
         profile_data = load_yaml_config(abac_profile)
-        cfg.abac_attributes.extend(load_abac_from_yaml(profile_data))
+        custom_abac.extend(load_abac_from_yaml(profile_data))
 
-    # ABAC from inline flag
     if abac_inline:
-        cfg.abac_attributes.extend(parse_abac_inline(abac_inline))
+        custom_abac.extend(parse_abac_inline(abac_inline))
+
+    if custom_abac or cfg.abac_attributes:
+        # User specified custom ABAC — use those (YAML + profile + inline)
+        cfg.abac_attributes.extend(custom_abac)
+    else:
+        # No custom ABAC — use built-in defaults
+        cfg.abac_attributes = list(DEFAULT_ABAC_ATTRIBUTES)
 
     return cfg

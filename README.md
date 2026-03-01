@@ -202,9 +202,21 @@ embiggenator generate-ldif -c embiggenator.yaml -u 50 -o ./embiggenator-data
 
 ## ABAC Attributes
 
-Custom attributes are assigned to generated users using standard `inetOrgPerson` attributes, so no LDAP schema changes are needed.
+Every generated user gets custom LDAP attributes assigned by default, using standard `inetOrgPerson` attributes (no schema changes needed):
 
-### Via YAML config
+| Attribute | Values | Distribution |
+|---|---|---|
+| `businessCategory` | `IL4`, `IL5`, `IL6` | Weighted (50/35/15) |
+| `departmentNumber` | `Engineering`, `Sales`, `Support`, `Finance`, `HR` | Uniform |
+| `employeeType` | `Full-Time`, `Contractor`, `Intern` | Weighted (70/20/10) |
+
+These are useful for testing ABAC policies out of the box — the values are predictable and easy to find in the Mattermost UI or server logs.
+
+### Custom ABAC attributes
+
+Specifying any custom ABAC attributes (via `--abac`, `--abac-profile`, or YAML config) replaces the defaults entirely.
+
+#### Via YAML config
 
 ```yaml
 abac:
@@ -218,7 +230,7 @@ abac:
 
 When `weights` are provided, values are selected according to those proportions. Without weights, values are distributed uniformly.
 
-### Via inline flag
+#### Via inline flag
 
 ```bash
 embiggenator generate-ldif -u 100 --abac "departmentNumber=Engineering,Sales,Support;businessCategory=Public,Confidential,Secret"
@@ -226,7 +238,7 @@ embiggenator generate-ldif -u 100 --abac "departmentNumber=Engineering,Sales,Sup
 
 Multiple attributes are separated by `;`, values within an attribute by `,`.
 
-### Via profile file
+#### Via profile file
 
 ```bash
 embiggenator generate-ldif -u 100 --abac-profile abac-attrs.yaml

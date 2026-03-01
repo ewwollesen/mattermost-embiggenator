@@ -7,6 +7,7 @@ import pytest
 import yaml
 
 from embiggenator.config import (
+    DEFAULT_ABAC_ATTRIBUTES,
     AbacAttribute,
     Config,
     build_config,
@@ -112,3 +113,16 @@ class TestBuildConfig:
     def test_abac_inline(self):
         cfg = build_config(abac_inline="dept=A,B;cat=X,Y")
         assert len(cfg.abac_attributes) == 2
+
+    def test_default_abac_attributes(self):
+        cfg = build_config()
+        assert len(cfg.abac_attributes) == 3
+        names = [a.name for a in cfg.abac_attributes]
+        assert "businessCategory" in names
+        assert "departmentNumber" in names
+        assert "employeeType" in names
+
+    def test_custom_abac_replaces_defaults(self):
+        cfg = build_config(abac_inline="custom=X,Y")
+        assert len(cfg.abac_attributes) == 1
+        assert cfg.abac_attributes[0].name == "custom"
