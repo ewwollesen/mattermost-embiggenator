@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import base64
+import json
+import urllib.request
+import urllib.error
 from pathlib import Path
 
 import click
@@ -54,6 +57,51 @@ def populate_ldap(
 
     finally:
         conn.unbind()
+
+
+def login_mattermost_users(
+    users: list[GeneratedUser],
+    mattermost_url: str,
+    password: str,
+) -> None:
+    """Log in each user to Mattermost via the API to trigger account creation."""
+    url = mattermost_url.rstrip("/") + "/api/v4/users/login"
+
+    logged_in = 0
+    already_existed = 0
+    failed = 0
+
+    for user in users:
+        payload = json.dumps({"login_id": user.uid, "password": password}).encode("utf-8")
+        req = urllib.request.Request(
+            url,
+            data=payload,
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+
+        try:
+            with urllib.request.urlopen(req) as resp:
+                if resp.status == 200:
+                    logged_in += 1
+        except urllib.error.HTTPError as e:
+            if e.code == 200:
+                logged_in += 1
+            else:
+                failed += 1
+                if failed <= 3:
+                    body = e.read().decode("utf-8", errors="replace")
+                    click.echo(f"  Login failed for {user.uid}: HTTP {e.code} — {body}")
+                elif failed == 4:
+                    click.echo("  (suppressing further login errors)")
+        except urllib.error.URLError as e:
+            failed += 1
+            if failed == 1:
+                click.echo(f"  Cannot reach Mattermost at {mattermost_url}: {e.reason}")
+                click.echo("  Skipping remaining logins")
+                break
+
+    click.echo(f"Mattermost logins: {logged_in} activated, {failed} failed")
 
 
 def reset_ldap(

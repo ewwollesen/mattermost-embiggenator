@@ -119,13 +119,16 @@ def generate_ldif_cmd(
 @click.option("--bind-dn", type=str, default=None, help="Bind DN (default: cn=admin,dc=planetexpress,dc=com)")
 @click.option("--bind-password", type=str, default=None, help="Bind password (default: GoodNewsEveryone)")
 @click.option("--use-ssl", is_flag=True, default=False, help="Use SSL/TLS connection")
+@click.option("--mattermost-url", type=str, default=None, help="Mattermost server URL to log users in and activate accounts")
+@click.option("--nologin", is_flag=True, default=False, help="Skip Mattermost login (only populate LDAP)")
 def populate_cmd(
     host, port, bind_dn, bind_password, use_ssl,
+    mattermost_url, nologin,
     config_file, users, groups, members_per_group, base_dn, email_domain,
     default_password, password_scheme, seed, abac_inline, abac_profile,
 ) -> None:
     """Populate a running LDAP server with generated entries."""
-    from embiggenator.output.ldap_writer import populate_ldap
+    from embiggenator.output.ldap_writer import login_mattermost_users, populate_ldap
 
     cfg, generated_users, generated_groups = _build_config_and_generate(
         config_file, users, groups, members_per_group, base_dn, email_domain,
@@ -141,6 +144,10 @@ def populate_cmd(
         bind_password=bind_password or "GoodNewsEveryone",
         use_ssl=use_ssl,
     )
+
+    if mattermost_url and not nologin:
+        click.echo(f"Logging users into Mattermost at {mattermost_url}...")
+        login_mattermost_users(generated_users, mattermost_url, cfg.default_password)
 
 
 @cli.command("reset")

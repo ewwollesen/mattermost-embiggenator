@@ -63,6 +63,16 @@ embiggenator populate -u 500 -g 20 -m 10-50 --host localhost --port 10389
 
 Existing entries are skipped automatically.
 
+To also create Mattermost user accounts (by logging each user in via the API), add `--mattermost-url`:
+
+```bash
+embiggenator populate -u 500 -g 20 -m 10-50 \
+  --host localhost --port 10389 \
+  --mattermost-url http://localhost:8065
+```
+
+Mattermost only creates LDAP user accounts on first login, so this step triggers that for every generated user. Use `--nologin` to skip it if you only need the LDAP entries.
+
 > **Mattermost note:** When using `populate` or `reset`, groups are created with `objectClass=groupOfNames` (the standard OpenLDAP objectClass). You must set your Mattermost group filter accordingly:
 >
 > `LdapSettings.GroupFilter` = `(objectClass=groupOfNames)`
@@ -112,6 +122,8 @@ Accepts all the same generation options as `generate-ldif`, plus:
 | `--bind-dn` | Bind DN for authentication | `cn=admin,dc=planetexpress,dc=com` |
 | `--bind-password` | Bind password | `GoodNewsEveryone` |
 | `--use-ssl` | Use SSL/TLS connection | false |
+| `--mattermost-url` | Mattermost URL — logs in each user to activate accounts | -- |
+| `--nologin` | Skip the Mattermost login step | false |
 
 ### `reset`
 
