@@ -63,6 +63,12 @@ embiggenator populate -u 500 -g 20 -m 10-50 --host localhost --port 10389
 
 Existing entries are skipped automatically.
 
+> **Mattermost note:** When using `populate` or `reset`, groups are created with `objectClass=groupOfNames` (the standard OpenLDAP objectClass). You must set your Mattermost group filter accordingly:
+>
+> `LdapSettings.GroupFilter` = `(objectClass=groupOfNames)`
+>
+> The `generate-ldif` mode uses the AD-style `objectClass=Group` to match the upstream docker-test-openldap defaults, so if you use that mode you can keep `(objectClass=Group)` as the filter.
+
 ## Commands
 
 ### `generate-ldif`

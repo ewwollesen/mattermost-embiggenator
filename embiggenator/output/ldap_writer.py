@@ -43,7 +43,7 @@ def populate_ldap(
         added_groups = 0
         skipped_groups = 0
         for group in groups:
-            attrs = _attrs_to_dict(group.to_ldif_attrs())
+            attrs = _attrs_to_dict(group.to_ldif_attrs(live=True))
             try:
                 conn.add(group.dn, attributes=attrs)
                 added_groups += 1
@@ -99,6 +99,10 @@ def reset_ldap(
             restored = 0
             for ldif_file in sorted(defaults_dir.glob("*.ldif")):
                 for entry_dn, attrs in _parse_ldif_file(ldif_file):
+                    # Convert AD-style Group objectClass to groupOfNames
+                    # for live LDAP (bootstrap LDIF skips schema validation,
+                    # but ldap3 add does not)
+                    attrs = _fixup_group_objectclass(attrs)
                     try:
                         conn.add(entry_dn, attributes=attrs)
                         if conn.result["result"] == 0:
@@ -158,6 +162,28 @@ def _parse_ldif_file(path: Path) -> list[tuple[str, dict[str, list[str | bytes]]
         entries.append((current_dn, current_attrs))
 
     return entries
+
+
+def _fixup_group_objectclass(attrs: dict[str, list]) -> dict[str, list]:
+    """Convert AD-style Group objectClass to groupOfNames for live LDAP."""
+    oc_key = None
+    for key in attrs:
+        if key.lower() == "objectclass":
+            oc_key = key
+            break
+
+    if oc_key is None:
+        return attrs
+
+    oc_values = [v if isinstance(v, str) else v.decode("utf-8") for v in attrs[oc_key]]
+    oc_lower = [v.lower() for v in oc_values]
+
+    if "group" in oc_lower:
+        attrs[oc_key] = ["groupOfNames"]
+        # Remove groupType since it's AD-specific and not in the groupOfNames schema
+        attrs.pop("groupType", None)
+
+    return attrs
 
 
 def _attrs_to_dict(attr_tuples: list[tuple[str, str]]) -> dict[str, list[str]]:

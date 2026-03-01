@@ -59,16 +59,30 @@ class GeneratedGroup:
     def dn(self) -> str:
         return f"cn={_escape_dn_value(self.cn)},ou={self.group_ou},{self.base_dn}"
 
-    def to_ldif_attrs(self) -> list[tuple[str, str]]:
-        """Return attribute tuples for LDIF output."""
-        attrs = [
-            ("dn", self.dn),
-            ("objectClass", "Group"),
-            ("objectClass", "top"),
-            ("groupType", "2147483650"),
-            ("cn", self.cn),
-            ("description", self.description),
-        ]
+    def to_ldif_attrs(self, live: bool = False) -> list[tuple[str, str]]:
+        """Return attribute tuples for LDIF/LDAP output.
+
+        Args:
+            live: If True, use groupOfNames (for ldap3 populate against a running
+                  server). If False, use Group (for LDIF bootstrap which skips
+                  schema validation).
+        """
+        if live:
+            attrs = [
+                ("dn", self.dn),
+                ("objectClass", "groupOfNames"),
+                ("cn", self.cn),
+                ("description", self.description),
+            ]
+        else:
+            attrs = [
+                ("dn", self.dn),
+                ("objectClass", "Group"),
+                ("objectClass", "top"),
+                ("groupType", "2147483650"),
+                ("cn", self.cn),
+                ("description", self.description),
+            ]
         for member_dn in self.member_dns:
             attrs.append(("member", member_dn))
         return attrs
