@@ -65,7 +65,7 @@ class TestLdifWriter:
         # Should have 5 user entries separated by blank lines
         assert users_content.count("objectClass: inetOrgPerson") == 5
         # Should have 2 group entries
-        assert groups_content.count("objectClass: groupOfNames") == 2
+        assert groups_content.count("objectClass: Group") == 2
 
     def test_copies_defaults(self, tmp_path):
         cfg = Config(users=1, groups=0, seed=42)

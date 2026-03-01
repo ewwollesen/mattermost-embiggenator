@@ -63,7 +63,9 @@ class GeneratedGroup:
         """Return attribute tuples for LDIF output."""
         attrs = [
             ("dn", self.dn),
-            ("objectClass", "groupOfNames"),
+            ("objectClass", "Group"),
+            ("objectClass", "top"),
+            ("groupType", "2147483650"),
             ("cn", self.cn),
             ("description", self.description),
         ]

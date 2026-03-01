@@ -143,6 +143,30 @@ def populate_cmd(
     )
 
 
+@cli.command("reset")
+@click.option("--host", type=str, default="localhost", show_default=True, help="LDAP server host")
+@click.option("--port", type=int, default=10389, show_default=True, help="LDAP server port")
+@click.option("--bind-dn", type=str, default=None, help="Bind DN (default: cn=admin,dc=planetexpress,dc=com)")
+@click.option("--bind-password", type=str, default=None, help="Bind password (default: GoodNewsEveryone)")
+@click.option("--use-ssl", is_flag=True, default=False, help="Use SSL/TLS connection")
+@click.option("--base-dn", type=str, default="dc=planetexpress,dc=com", show_default=True, help="Base DN")
+@click.option("--no-restore", is_flag=True, default=False, help="Don't restore built-in default entries after clearing")
+@click.confirmation_option(prompt="This will delete ALL entries under ou=people. Continue?")
+def reset_cmd(host, port, bind_dn, bind_password, use_ssl, base_dn, no_restore) -> None:
+    """Delete all entries and optionally restore built-in defaults."""
+    from embiggenator.output.ldap_writer import reset_ldap
+
+    reset_ldap(
+        base_dn=base_dn,
+        host=host,
+        port=port,
+        bind_dn=bind_dn or f"cn=admin,{base_dn}",
+        bind_password=bind_password or "GoodNewsEveryone",
+        use_ssl=use_ssl,
+        restore_defaults=not no_restore,
+    )
+
+
 @cli.command("show-config")
 @click.option("-c", "--config", "config_file", type=click.Path(exists=True), default=None, help="YAML config file")
 def show_config_cmd(config_file) -> None:

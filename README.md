@@ -107,6 +107,32 @@ Accepts all the same generation options as `generate-ldif`, plus:
 | `--bind-password` | Bind password | `GoodNewsEveryone` |
 | `--use-ssl` | Use SSL/TLS connection | false |
 
+### `reset`
+
+Connects to a running LDAP server, deletes all entries under `ou=people`, and restores the 7 built-in users and 2 built-in groups from the upstream Docker image. Useful when you've run `populate` multiple times or otherwise need a clean slate.
+
+```bash
+# Wipe everything and restore built-in defaults (prompts for confirmation)
+embiggenator reset --host localhost --port 10389
+
+# Skip the confirmation prompt
+embiggenator reset --host localhost --port 10389 --yes
+
+# Wipe everything, don't restore defaults (empty OU)
+embiggenator reset --host localhost --port 10389 --no-restore --yes
+```
+
+| Option | Description | Default |
+|---|---|---|
+| `--host` | LDAP server host | `localhost` |
+| `--port` | LDAP server port | `10389` |
+| `--bind-dn` | Bind DN for authentication | `cn=admin,dc=planetexpress,dc=com` |
+| `--bind-password` | Bind password | `GoodNewsEveryone` |
+| `--use-ssl` | Use SSL/TLS connection | false |
+| `--base-dn` | Base DN | `dc=planetexpress,dc=com` |
+| `--no-restore` | Don't restore built-in defaults after clearing | false |
+| `--yes` | Skip confirmation prompt | false |
+
 ### `show-config`
 
 Displays the resolved configuration after merging defaults, YAML file, and CLI options. Useful for debugging.
@@ -261,7 +287,7 @@ ldapsearch -H ldap://localhost:10389 \
   -D "cn=admin,dc=planetexpress,dc=com" \
   -w GoodNewsEveryone \
   -b "ou=people,dc=planetexpress,dc=com" \
-  "(objectClass=groupOfNames)" cn
+  "(objectClass=Group)" cn
 ```
 
 With 50 generated users, you should see 57 total user entries (7 built-in + 50 generated).
