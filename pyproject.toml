@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "embiggenator"
-version = "0.1.0"
-description = "LDAP test data generator for Mattermost testing with rroemhild/docker-test-openldap"
+version = "0.2.0"
+description = "LDAP test data and Mattermost content generator for Mattermost testing"
 requires-python = ">=3.10"
 license = "MIT"
 dependencies = [
@@ -22,7 +22,7 @@ embiggenator = "embiggenator.cli:cli"
 include = ["embiggenator*"]
 
 [tool.setuptools.package-data]
-embiggenator = ["data/defaults/*.ldif"]
+embiggenator = ["data/defaults/*.ldif", "data/texts/*.txt"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

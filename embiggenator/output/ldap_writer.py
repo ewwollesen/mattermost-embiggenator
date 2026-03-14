@@ -63,13 +63,17 @@ def login_mattermost_users(
     users: list[GeneratedUser],
     mattermost_url: str,
     password: str,
-) -> None:
-    """Log in each user to Mattermost via the API to trigger account creation."""
+) -> dict[str, tuple[str, str]]:
+    """Log in each user to Mattermost via the API to trigger account creation.
+
+    Returns a mapping of uid -> (mm_user_id, session_token) for successfully
+    logged-in users. The session token can be used to post as that user.
+    """
     url = mattermost_url.rstrip("/") + "/api/v4/users/login"
 
     logged_in = 0
-    already_existed = 0
     failed = 0
+    user_map: dict[str, tuple[str, str]] = {}
 
     for user in users:
         payload = json.dumps({"login_id": user.uid, "password": password}).encode("utf-8")
@@ -84,6 +88,11 @@ def login_mattermost_users(
             with urllib.request.urlopen(req) as resp:
                 if resp.status == 200:
                     logged_in += 1
+                    token = resp.headers.get("Token", "")
+                    body = json.loads(resp.read().decode("utf-8"))
+                    mm_user_id = body.get("id", "")
+                    if mm_user_id and token:
+                        user_map[user.uid] = (mm_user_id, token)
         except urllib.error.HTTPError as e:
             if e.code == 200:
                 logged_in += 1
@@ -102,6 +111,7 @@ def login_mattermost_users(
                 break
 
     click.echo(f"Mattermost logins: {logged_in} activated, {failed} failed")
+    return user_map
 
 
 def reset_ldap(

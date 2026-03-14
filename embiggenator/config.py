@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -24,6 +25,68 @@ class AbacAttribute:
                 f"ABAC attribute '{self.name}': "
                 f"weights length ({len(self.weights)}) != values length ({len(self.values)})"
             )
+
+
+@dataclass
+class ChannelConfig:
+    """A channel to create inside a team."""
+
+    name: str
+    display_name: str = ""
+    type: str = "public"  # "public" or "private"
+
+    def __post_init__(self) -> None:
+        if not self.display_name:
+            self.display_name = self.name.replace("-", " ").replace("_", " ").title()
+
+
+@dataclass
+class TeamConfig:
+    """A team to create with its channels."""
+
+    name: str
+    display_name: str = ""
+    channels: list[ChannelConfig] = field(default_factory=list)
+    channels_per_team_min: int | None = None  # per-team override (None = use global)
+    channels_per_team_max: int | None = None
+
+    def __post_init__(self) -> None:
+        if not self.display_name:
+            self.display_name = self.name.replace("-", " ").replace("_", " ").title()
+
+
+@dataclass
+class MattermostConfig:
+    """Mattermost server connection settings."""
+
+    url: str = "http://localhost:8065"
+    pat: str = ""
+
+
+@dataclass
+class ContentConfig:
+    """Content generation parameters."""
+
+    teams: list[TeamConfig] = field(default_factory=list)
+    channels_min: int | None = None  # total channels distributed across teams
+    channels_max: int | None = None
+    channels_per_team_min: int = 5   # fallback if channels not set
+    channels_per_team_max: int = 10
+    private_channel_probability: float = 0.2
+    members_per_channel_min: int = 5
+    members_per_channel_max: int = 50
+    posts_per_channel_min: int = 20
+    posts_per_channel_max: int = 50
+    reply_probability: float = 0.3
+    replies_per_thread_min: int = 1
+    replies_per_thread_max: int = 5
+    reaction_probability: float = 0.2
+    reactions_per_post_min: int = 1
+    reactions_per_post_max: int = 3
+    direct_messages_min: int = 10
+    direct_messages_max: int = 30
+    dms_per_conversation_min: int = 3
+    dms_per_conversation_max: int = 10
 
 
 DEFAULT_ABAC_ATTRIBUTES = [
@@ -61,6 +124,8 @@ class Config:
     seed: int | None = None
     abac_attributes: list[AbacAttribute] = field(default_factory=list)
     include_defaults: bool = True
+    mattermost: MattermostConfig = field(default_factory=MattermostConfig)
+    content: ContentConfig = field(default_factory=ContentConfig)
 
     @property
     def people_dn(self) -> str:
@@ -69,6 +134,32 @@ class Config:
     @property
     def group_dn(self) -> str:
         return f"ou={self.group_ou},{self.base_dn}"
+
+
+_ENV_VAR_RE = re.compile(r"\$\{(\w+)\}")
+
+
+def expand_env_vars(value: str) -> str:
+    """Expand ${VAR} references in a string using environment variables.
+
+    Unset variables expand to empty string.
+    """
+    def _replace(match: re.Match) -> str:
+        return os.environ.get(match.group(1), "")
+    return _ENV_VAR_RE.sub(_replace, value)
+
+
+def parse_range(value: str | int | float) -> tuple[int, int]:
+    """Parse a range value like '10', '5-20', or a bare integer."""
+    s = str(value)
+    if "-" in s:
+        parts = s.split("-", 1)
+        lo, hi = int(parts[0]), int(parts[1])
+        if lo > hi:
+            raise ValueError(f"Invalid range: {lo} > {hi}")
+        return lo, hi
+    n = int(s)
+    return n, n
 
 
 def parse_members_range(value: str) -> tuple[int, int]:
@@ -119,6 +210,100 @@ def load_yaml_config(path: str | Path) -> dict[str, Any]:
         return yaml.safe_load(f) or {}
 
 
+def _load_mattermost_from_yaml(data: dict[str, Any]) -> MattermostConfig:
+    """Extract Mattermost connection config from YAML."""
+    mm = data.get("mattermost", {})
+    if not mm:
+        return MattermostConfig()
+    url = mm.get("url", "http://localhost:8065")
+    pat = expand_env_vars(str(mm.get("pat", "")))
+    return MattermostConfig(url=url, pat=pat)
+
+
+def _load_content_from_yaml(data: dict[str, Any]) -> ContentConfig:
+    """Extract content generation config from YAML."""
+    ct = data.get("content", {})
+    if not ct:
+        return ContentConfig()
+
+    cfg = ContentConfig()
+
+    if "channels" in ct:
+        lo, hi = parse_range(ct["channels"])
+        cfg.channels_min = lo
+        cfg.channels_max = hi
+
+    if "channels_per_team" in ct:
+        lo, hi = parse_range(ct["channels_per_team"])
+        cfg.channels_per_team_min = lo
+        cfg.channels_per_team_max = hi
+
+    if "private_channel_probability" in ct:
+        cfg.private_channel_probability = float(ct["private_channel_probability"])
+
+    if "members_per_channel" in ct:
+        lo, hi = parse_range(ct["members_per_channel"])
+        cfg.members_per_channel_min = lo
+        cfg.members_per_channel_max = hi
+
+    # Teams
+    for team_data in ct.get("teams", []):
+        channels = []
+        for ch in team_data.get("channels", []):
+            if isinstance(ch, str):
+                channels.append(ChannelConfig(name=ch))
+            else:
+                channels.append(ChannelConfig(
+                    name=ch["name"],
+                    display_name=ch.get("display_name", ""),
+                    type=ch.get("type", "public"),
+                ))
+        team_ch_min: int | None = None
+        team_ch_max: int | None = None
+        if "channels_per_team" in team_data:
+            team_ch_min, team_ch_max = parse_range(team_data["channels_per_team"])
+        cfg.teams.append(TeamConfig(
+            name=team_data["name"],
+            display_name=team_data.get("display_name", ""),
+            channels=channels,
+            channels_per_team_min=team_ch_min,
+            channels_per_team_max=team_ch_max,
+        ))
+
+    if "posts_per_channel" in ct:
+        lo, hi = parse_range(ct["posts_per_channel"])
+        cfg.posts_per_channel_min = lo
+        cfg.posts_per_channel_max = hi
+
+    if "reply_probability" in ct:
+        cfg.reply_probability = float(ct["reply_probability"])
+
+    if "replies_per_thread" in ct:
+        lo, hi = parse_range(ct["replies_per_thread"])
+        cfg.replies_per_thread_min = lo
+        cfg.replies_per_thread_max = hi
+
+    if "reaction_probability" in ct:
+        cfg.reaction_probability = float(ct["reaction_probability"])
+
+    if "reactions_per_post" in ct:
+        lo, hi = parse_range(ct["reactions_per_post"])
+        cfg.reactions_per_post_min = lo
+        cfg.reactions_per_post_max = hi
+
+    if "direct_messages" in ct:
+        lo, hi = parse_range(ct["direct_messages"])
+        cfg.direct_messages_min = lo
+        cfg.direct_messages_max = hi
+
+    if "dms_per_conversation" in ct:
+        lo, hi = parse_range(ct["dms_per_conversation"])
+        cfg.dms_per_conversation_min = lo
+        cfg.dms_per_conversation_max = hi
+
+    return cfg
+
+
 def build_config(
     *,
     config_file: str | None = None,
@@ -133,6 +318,7 @@ def build_config(
     abac_inline: str | None = None,
     abac_profile: str | None = None,
     no_defaults: bool = False,
+    pat: str | None = None,
 ) -> Config:
     """Build a Config by merging defaults < YAML file < CLI overrides."""
     cfg = Config()
@@ -167,6 +353,10 @@ def build_config(
             cfg.include_defaults = bool(yaml_data["include_defaults"])
         cfg.abac_attributes.extend(load_abac_from_yaml(yaml_data))
 
+        # New v2 sections
+        cfg.mattermost = _load_mattermost_from_yaml(yaml_data)
+        cfg.content = _load_content_from_yaml(yaml_data)
+
     # Layer 2: CLI overrides
     if users is not None:
         cfg.users = users
@@ -188,6 +378,8 @@ def build_config(
         cfg.seed = seed
     if no_defaults:
         cfg.include_defaults = False
+    if pat is not None:
+        cfg.mattermost.pat = pat
 
     # ABAC: use custom attributes if any are specified, otherwise use defaults
     custom_abac: list[AbacAttribute] = []
