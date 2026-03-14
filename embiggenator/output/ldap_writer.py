@@ -10,7 +10,7 @@ from pathlib import Path
 
 import click
 from ldap3 import ALL, SUBTREE, Connection, Server
-from ldap3.core.exceptions import LDAPEntryAlreadyExistsResult
+from ldap3.core.exceptions import LDAPEntryAlreadyExistsResult, LDAPException
 
 from embiggenator.models import GeneratedGroup, GeneratedUser
 
@@ -26,7 +26,7 @@ def populate_ldap(
 ) -> None:
     """Connect to a running LDAP server and add generated entries."""
     server = Server(host, port=port, use_ssl=use_ssl, get_info=ALL)
-    with Connection(server, user=bind_dn, password=bind_password, auto_bind=True) as conn:
+    with Connection(server, user=bind_dn, password=bind_password, auto_bind=True, raise_exceptions=True) as conn:
         # Add users first (groups reference them)
         added_users = 0
         skipped_users = 0
@@ -120,7 +120,7 @@ def reset_ldap(
     server = Server(host, port=port, use_ssl=use_ssl, get_info=ALL)
     people_dn = f"ou={people_ou},{base_dn}"
 
-    with Connection(server, user=bind_dn, password=bind_password, auto_bind=True) as conn:
+    with Connection(server, user=bind_dn, password=bind_password, auto_bind=True, raise_exceptions=True) as conn:
         # Search for all entries under the people OU
         conn.search(people_dn, "(objectClass=*)", search_scope=SUBTREE)
         entries = [entry.entry_dn for entry in conn.entries]
@@ -131,9 +131,11 @@ def reset_ldap(
 
         deleted = 0
         for dn in entries_to_delete:
-            conn.delete(dn)
-            if conn.result["result"] == 0:
+            try:
+                conn.delete(dn)
                 deleted += 1
+            except LDAPException:
+                pass
 
         click.echo(f"Deleted {deleted} entries from {people_dn}")
 

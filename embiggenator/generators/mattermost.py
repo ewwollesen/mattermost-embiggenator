@@ -138,7 +138,8 @@ def generate_mattermost_content(
             ))
 
         # Create channels
-        for ch_cfg in all_channels:
+        n_total_channels = len(all_channels)
+        for ch_idx, ch_cfg in enumerate(all_channels, 1):
             ch_type = "P" if ch_cfg.type == "private" else "O"
             try:
                 channel_id = client.get_or_create_channel(
@@ -172,7 +173,7 @@ def generate_mattermost_content(
                 team_id=team_id,
                 member_uids=member_uids,
             ))
-            click.echo(f"    Channel: {ch_cfg.display_name} ({len(member_uids)} members)")
+            click.echo(f"    Channel ({ch_idx}/{n_total_channels}): {ch_cfg.display_name} ({len(member_uids)} members)")
 
     # Build lookup dict for O(1) channel access in later steps
     channel_by_id: dict[str, _ChannelInfo] = {ch.channel_id: ch for ch in channel_plans}
