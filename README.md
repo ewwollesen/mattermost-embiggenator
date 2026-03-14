@@ -1,8 +1,22 @@
 # Embiggenator
 
-LDAP test data generator for Mattermost. Generates hundreds or thousands of realistic LDAP user and group entries for testing LDAP connections, group sync, and ABAC against the [`rroemhild/docker-test-openldap`](https://github.com/rroemhild/docker-test-openldap) Docker image.
+LDAP and Mattermost test data generator. Creates realistic test environments with hundreds or thousands of users, groups, teams, channels, and conversations — all from a single config file.
 
-The upstream image only ships 7 users and 2 groups. Embiggenator fixes that.
+Built for the [`rroemhild/docker-test-openldap`](https://github.com/rroemhild/docker-test-openldap) Docker image (which only ships 7 users and 2 groups). Embiggenator fixes that.
+
+## Features
+
+- Creates a configurable number of LDAP users and groups with realistic names
+- Assigns a random subset of users to each group
+- Adds custom LDAP attributes for ABAC policy testing
+- Logs in newly created LDAP users to Mattermost so they appear in the instance
+- Creates Mattermost teams and adds users to them
+- Creates a configurable number of public and private channels
+- Populates channels with posts using passages from Pride and Prejudice and Wuthering Heights
+- Generates threaded replies and emoji reactions on posts
+- Creates direct message conversations between random user pairs
+- Supports deterministic, reproducible output via `--seed`
+- Driven entirely by a single YAML config file, with CLI overrides
 
 ## Installation
 
@@ -79,6 +93,25 @@ Mattermost only creates LDAP user accounts on first login, so this step triggers
 >
 > The `generate-ldif` mode uses the AD-style `objectClass=Group` to match the upstream docker-test-openldap defaults, so if you use that mode you can keep `(objectClass=Group)` as the filter.
 
+### 3. Generate Mattermost content
+
+Once users are logged in, generate teams, channels, posts, threads, reactions, and DMs:
+
+```bash
+embiggenator content -c embiggenator.yaml --pat "$MM_PAT"
+```
+
+Or do everything in one shot with `run-all`:
+
+```bash
+embiggenator run-all -c embiggenator.yaml \
+  --host localhost --port 10389 \
+  --mattermost-url http://localhost:8065 \
+  --pat "$MM_PAT"
+```
+
+This populates LDAP, logs users into Mattermost, and generates all content in sequence.
+
 ## Commands
 
 ### `generate-ldif`
@@ -125,6 +158,31 @@ Accepts all the same generation options as `generate-ldif`, plus:
 | `--mattermost-url` | Mattermost URL — logs in each user to activate accounts | -- |
 | `--nologin` | Skip the Mattermost login step | false |
 
+### `content`
+
+Generates Mattermost content against a running server. Requires users to already be logged in (via `populate --mattermost-url` or `run-all`).
+
+```
+embiggenator content [OPTIONS]
+```
+
+| Option | Description | Default |
+|---|---|---|
+| `-c`, `--config` | YAML config file | -- |
+| `--pat` | Mattermost Personal Access Token | -- |
+| `--mattermost-url` | Mattermost server URL (overrides config) | `http://localhost:8065` |
+| `--seed` | Random seed for reproducible output | -- |
+
+### `run-all`
+
+Runs everything in sequence: populate LDAP, login users to Mattermost, generate content.
+
+```
+embiggenator run-all [OPTIONS]
+```
+
+Accepts all options from `populate` plus `--pat` for content generation. If `--pat` is not provided, content generation is skipped.
+
 ### `reset`
 
 Connects to a running LDAP server, deletes all entries under `ou=people`, and restores the 7 built-in users and 2 built-in groups from the upstream Docker image. Useful when you've run `populate` multiple times or otherwise need a clean slate.
@@ -167,6 +225,7 @@ Options are resolved in priority order: **defaults < YAML config file < CLI flag
 ### YAML Config File
 
 ```yaml
+# LDAP settings
 users: 500
 groups: 20
 members_per_group: 10-50
@@ -175,6 +234,7 @@ default_password: password
 password_scheme: "{SSHA}"
 seed: 42
 
+# ABAC attributes for custom LDAP attribute testing
 abac:
   attributes:
     - name: departmentNumber
@@ -185,12 +245,49 @@ abac:
     - name: employeeType
       values: ["Full-Time", "Part-Time", "Contractor", "Intern"]
       weights: [60, 15, 15, 10]
+
+# Mattermost connection
+mattermost:
+  url: http://localhost:8065
+  pat: "${MM_PAT}"              # env var expansion supported
+
+# Content generation
+content:
+  # Option A: total channels distributed across teams
+  channels: 100-200
+
+  # Option B: channels per team (used if 'channels' is not set)
+  # channels_per_team: 5-10
+
+  private_channel_probability: 0.2
+  members_per_channel: 5-50
+  posts_per_channel: 20-50
+  reply_probability: 0.3
+  replies_per_thread: 1-5
+  reaction_probability: 0.2
+  reactions_per_post: 1-3
+  direct_messages: 10-30
+  dms_per_conversation: 3-10
+
+  teams:
+    - name: engineering
+      display_name: Engineering
+      channels:                     # explicit channels (auto-generated ones fill the rest)
+        - name: general
+        - name: backend
+          type: private
+        - name: frontend
+    - name: support
+      display_name: Support
+      channels_per_team: 20-30      # per-team override
 ```
 
 Use it with:
 
 ```bash
-embiggenator generate-ldif -c embiggenator.yaml -o ./embiggenator-data
+embiggenator run-all -c embiggenator.yaml \
+  --host localhost --port 10389 \
+  --pat "$MM_PAT"
 ```
 
 CLI flags override values from the config file:
@@ -255,6 +352,8 @@ embiggenator generate-ldif -u 100 -g 10 --seed 42 -o ./data1
 embiggenator generate-ldif -u 100 -g 10 --seed 42 -o ./data2
 # data1/ and data2/ will contain identical entries
 ```
+
+This applies to all commands — LDAP generation, content generation, channel names, member assignments, and post content are all deterministic for a given seed.
 
 ## Docker Compose Examples
 
