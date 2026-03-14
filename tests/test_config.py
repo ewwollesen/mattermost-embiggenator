@@ -149,6 +149,15 @@ class TestParseRange:
         with pytest.raises(ValueError, match="Invalid range"):
             parse_range("20-5")
 
+    def test_negative_single_value(self):
+        assert parse_range("-5") == (-5, -5)
+
+    def test_negative_to_positive_range(self):
+        assert parse_range("-5-20") == (-5, 20)
+
+    def test_float_input(self):
+        assert parse_range(10.7) == (10, 10)
+
 
 class TestExpandEnvVars:
     def test_expand_set_var(self, monkeypatch):
@@ -215,6 +224,31 @@ class TestContentConfig:
         assert cc.posts_per_channel_max == 50
         assert cc.reply_probability == 0.3
         assert cc.reaction_probability == 0.2
+
+    def test_asymmetric_channels_min_max_raises(self):
+        with pytest.raises(ValueError, match="channels_min and channels_max"):
+            ContentConfig(channels_min=10, channels_max=None)
+
+    def test_asymmetric_channels_max_only_raises(self):
+        with pytest.raises(ValueError, match="channels_min and channels_max"):
+            ContentConfig(channels_min=None, channels_max=20)
+
+    def test_reply_probability_too_high(self):
+        with pytest.raises(ValueError, match="reply_probability"):
+            ContentConfig(reply_probability=1.5)
+
+    def test_reaction_probability_negative(self):
+        with pytest.raises(ValueError, match="reaction_probability"):
+            ContentConfig(reaction_probability=-0.1)
+
+    def test_private_channel_probability_too_high(self):
+        with pytest.raises(ValueError, match="private_channel_probability"):
+            ContentConfig(private_channel_probability=2.0)
+
+    def test_boundary_probabilities_valid(self):
+        cc = ContentConfig(reply_probability=0.0, reaction_probability=1.0)
+        assert cc.reply_probability == 0.0
+        assert cc.reaction_probability == 1.0
 
 
 class TestBuildConfigV2:

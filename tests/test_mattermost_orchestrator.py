@@ -153,6 +153,29 @@ class TestGenerateMattermostContent:
         assert result.posts_created == 0
         assert result.teams_created == 0
 
+    def test_single_user(self, mock_client, passage_bank):
+        """Single user should not crash — channels get 1 member, DMs skipped."""
+        single_user_map = {"user0": ("mm_id_0", "token_0")}
+        config = ContentConfig(
+            teams=[TeamConfig(name="t", channels_per_team_min=2, channels_per_team_max=2)],
+            channels_per_team_min=2,
+            channels_per_team_max=2,
+            members_per_channel_min=5,
+            members_per_channel_max=10,
+            posts_per_channel_min=1,
+            posts_per_channel_max=2,
+            direct_messages_min=1,
+            direct_messages_max=3,
+            dms_per_conversation_min=1,
+            dms_per_conversation_max=2,
+        )
+        result = generate_mattermost_content(
+            mock_client, config, single_user_map, seed=42, passage_bank=passage_bank,
+        )
+        assert result.channels_created == 2
+        assert result.posts_created >= 2
+        assert result.dm_conversations == 0  # need >= 2 users for DMs
+
     def test_private_channel_type(self, mock_client, small_content_config, user_map, passage_bank):
         generate_mattermost_content(
             mock_client, small_content_config, user_map, seed=42, passage_bank=passage_bank,

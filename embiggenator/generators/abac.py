@@ -18,7 +18,7 @@ def assign_abac_attributes(
     """
     result: dict[str, str] = {}
     for attr in abac_attrs:
-        if attr.weights:
+        if attr.weights is not None:
             # Weighted selection using cumulative weights
             value = _weighted_choice(attr.values, attr.weights, fake)
         else:

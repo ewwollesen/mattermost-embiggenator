@@ -14,7 +14,7 @@ from embiggenator.output.mattermost_client import MattermostClient, MattermostAP
 # Emoji pool for reactions
 REACTION_EMOJIS = [
     "thumbsup", "thumbsdown", "heart", "smile", "laughing",
-    "tada", "thinking", "eyes", "+1", "-1",
+    "tada", "thinking", "eyes",
     "wave", "fire", "rocket", "100", "clap",
     "slightly_smiling_face", "grinning", "white_check_mark",
 ]
@@ -46,6 +46,7 @@ def generate_channel_configs(
     """Generate random channel configs with unique Mattermost-valid names."""
     used = set(existing_names) if existing_names else set()
     channels: list[ChannelConfig] = []
+    fallback_counter = 1  # monotonic counter for numbered fallback names
 
     # Build a shuffled pool of all prefix-suffix combos
     combos = [(p, s) for p in _CHANNEL_PREFIXES for s in _CHANNEL_SUFFIXES]
@@ -63,10 +64,10 @@ def generate_channel_configs(
 
         # Fall back to numbered names if combos exhausted
         if name is None:
-            i = len(used) + 1
-            while f"channel-{i}" in used:
-                i += 1
-            name = f"channel-{i}"
+            while f"channel-{fallback_counter}" in used:
+                fallback_counter += 1
+            name = f"channel-{fallback_counter}"
+            fallback_counter += 1
 
         used.add(name)
         ch_type = "private" if rng.random() < private_probability else "public"
@@ -153,7 +154,8 @@ def generate_mattermost_content(
                 content_config.members_per_channel_min,
                 content_config.members_per_channel_max,
             )
-            n_members = max(2, min(n_members, len(uids)))
+            n_members = min(n_members, len(uids))
+            n_members = max(n_members, min(2, len(uids)))
             member_uids = rng.sample(uids, n_members)
 
             for uid in member_uids:
@@ -171,6 +173,9 @@ def generate_mattermost_content(
                 member_uids=member_uids,
             ))
             click.echo(f"    Channel: {ch_cfg.display_name} ({len(member_uids)} members)")
+
+    # Build lookup dict for O(1) channel access in later steps
+    channel_by_id: dict[str, _ChannelInfo] = {ch.channel_id: ch for ch in channel_plans}
 
     # ── Step 2: Generate posts ──
     all_post_ids: list[tuple[str, str, str]] = []  # (post_id, channel_id, author_uid)
@@ -201,7 +206,7 @@ def generate_mattermost_content(
         if rng.random() >= content_config.reply_probability:
             continue
         # Find which channel this post is in to get member list
-        ch_info = _find_channel(channel_plans, channel_id)
+        ch_info = channel_by_id.get(channel_id)
         if not ch_info:
             continue
 
@@ -228,7 +233,7 @@ def generate_mattermost_content(
     for post_id, channel_id, _ in all_post_ids:
         if rng.random() >= content_config.reaction_probability:
             continue
-        ch_info = _find_channel(channel_plans, channel_id)
+        ch_info = channel_by_id.get(channel_id)
         if not ch_info:
             continue
 
@@ -251,6 +256,10 @@ def generate_mattermost_content(
     click.echo(f"  Reactions added: {result.reactions_added}")
 
     # ── Step 5: Generate DMs ──
+    if len(uids) < 2:
+        click.echo(f"  DM conversations: 0 (need at least 2 users)")
+        return result
+
     n_dm_convos = rng.randint(
         content_config.direct_messages_min,
         content_config.direct_messages_max,
@@ -285,9 +294,9 @@ def generate_mattermost_content(
         for _ in range(n_messages):
             # Alternate between the two users
             if rng.random() < 0.5:
-                author_uid, token = uid1, token1
+                token = token1
             else:
-                author_uid, token = uid2, token2
+                token = token2
 
             message = bank.get_short_reply(rng)
             try:
@@ -313,12 +322,6 @@ class _ChannelInfo:
         self.member_uids = member_uids
 
 
-def _find_channel(channels: list[_ChannelInfo], channel_id: str) -> _ChannelInfo | None:
-    for ch in channels:
-        if ch.channel_id == channel_id:
-            return ch
-    return None
-
 
 def _compute_channel_targets(rng: random.Random, config: ContentConfig) -> list[int]:
     """Compute channel count for each team.
@@ -332,23 +335,31 @@ def _compute_channel_targets(rng: random.Random, config: ContentConfig) -> list[
     if n_teams == 0:
         return []
 
-    targets: list[int | None] = [None] * n_teams
+    targets: list[int] = [0] * n_teams
 
     # Apply per-team overrides first
+    overridden: set[int] = set()
     for i, team in enumerate(config.teams):
         if team.channels_per_team_min is not None:
             targets[i] = rng.randint(team.channels_per_team_min, team.channels_per_team_max)
+            overridden.add(i)
 
     # If top-level `channels` is set, distribute remaining across non-overridden teams
     if config.channels_min is not None:
         total = rng.randint(config.channels_min, config.channels_max)
 
         # Subtract what's already allocated by per-team overrides
-        override_total = sum(t for t in targets if t is not None)
+        override_total = sum(targets[i] for i in overridden)
         remaining = max(0, total - override_total)
 
+        if override_total > total:
+            click.echo(
+                f"  Warning: per-team channel overrides ({override_total}) exceed "
+                f"total channels target ({total}). Override totals will be kept."
+            )
+
         # Find teams that need allocation
-        unset_indices = [i for i, t in enumerate(targets) if t is None]
+        unset_indices = [i for i in range(n_teams) if i not in overridden]
 
         if unset_indices:
             # Distribute remaining roughly evenly with some randomness
@@ -366,7 +377,7 @@ def _compute_channel_targets(rng: random.Random, config: ContentConfig) -> list[
     else:
         # No total channels — use channels_per_team for any remaining
         for i in range(n_teams):
-            if targets[i] is None:
+            if i not in overridden:
                 targets[i] = rng.randint(
                     config.channels_per_team_min, config.channels_per_team_max,
                 )

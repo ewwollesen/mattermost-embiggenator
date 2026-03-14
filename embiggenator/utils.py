@@ -11,6 +11,10 @@ def hash_password(password: str, scheme: str = "{SSHA}") -> str:
     """Hash a password using the specified scheme.
 
     Supported schemes: {SSHA}, {SHA}, {PLAIN}
+
+    Note: {SSHA} and {SHA} use SHA-1 as required by OpenLDAP's password
+    storage format. SHA-1 is cryptographically weak — these hashes are
+    intended for ephemeral test environments only, not production use.
     """
     scheme_upper = scheme.upper()
 

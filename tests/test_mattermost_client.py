@@ -199,9 +199,125 @@ class TestErrorHandling:
             mc.create_team("x", "X")
         assert exc_info.value.status == 404
 
-    def test_rate_limit_retry(self, client):
+    def test_rate_limit_retry_succeeds(self, client):
+        """Test that 429 is retried and succeeds on next attempt."""
         mc, handler = client
-        # We can't easily test 429 retry with this simple mock server,
-        # but we can verify the retry logic exists by checking the class constants
-        assert mc.MAX_RETRIES == 3
-        assert mc.BACKOFF_BASE == 1.0
+        mc.BACKOFF_BASE = 0.01  # speed up test
+        call_count = {"n": 0}
+        original_handle = _MockHandler._handle
+
+        def _rate_limit_handle(self_handler):
+            if self_handler.command == "POST" and "/teams" in self_handler.path:
+                content_length = int(self_handler.headers.get("Content-Length", 0))
+                body = None
+                if content_length > 0:
+                    body = self_handler.rfile.read(content_length)
+                call_count["n"] += 1
+                if call_count["n"] == 1:
+                    self_handler.send_response(429)
+                    self_handler.send_header("Content-Type", "application/json")
+                    self_handler.send_header("Retry-After", "0.01")
+                    self_handler.end_headers()
+                    self_handler.wfile.write(json.dumps({"message": "rate limited"}).encode())
+                    return
+                self_handler.send_response(200)
+                self_handler.send_header("Content-Type", "application/json")
+                self_handler.end_headers()
+                self_handler.wfile.write(json.dumps({"id": "team_after_retry"}).encode())
+                return
+            original_handle(self_handler)
+
+        _MockHandler._handle = _rate_limit_handle
+        _MockHandler.do_POST = _rate_limit_handle
+        _MockHandler.do_GET = _rate_limit_handle
+        try:
+            team_id = mc.create_team("eng", "Engineering")
+            assert team_id == "team_after_retry"
+            assert call_count["n"] == 2
+        finally:
+            _MockHandler._handle = original_handle
+            _MockHandler.do_POST = original_handle
+            _MockHandler.do_GET = original_handle
+
+    def test_rate_limit_caps_retry_after(self, client):
+        mc, handler = client
+        assert mc.MAX_RETRY_WAIT == 30.0
+
+
+class TestGetUsersByUsernames:
+    def test_batch_lookup(self, client):
+        mc, handler = client
+        handler.responses[("POST", "/api/v4/users/usernames")] = (
+            200, [{"id": "u1", "username": "alice"}, {"id": "u2", "username": "bob"}],
+        )
+        result = mc.get_users_by_usernames(["alice", "bob"])
+        assert len(result) == 2
+        assert result[0]["username"] == "alice"
+
+    def test_empty_list(self, client):
+        mc, handler = client
+        result = mc.get_users_by_usernames([])
+        assert result == []
+        assert len(handler.requests) == 0
+
+
+class TestGetAllUsers:
+    def test_single_page(self, client):
+        mc, handler = client
+        users = [{"id": f"u{i}", "username": f"user{i}"} for i in range(5)]
+        handler.responses[("GET", "/api/v4/users")] = (200, users)
+        result = mc.get_all_users(per_page=200)
+        assert len(result) == 5
+
+    def test_empty_server(self, client):
+        mc, handler = client
+        handler.responses[("GET", "/api/v4/users")] = (200, [])
+        result = mc.get_all_users()
+        assert result == []
+
+
+class TestGetOrCreateRaceCondition:
+    def test_team_conflict_retries_get(self, client):
+        mc, handler = client
+        # Simulate: GET returns 404, POST returns 409 (conflict), second GET finds it
+        call_count = {"get": 0}
+        original_handle = _MockHandler._handle
+
+        def _patched_handle(self_handler):
+            if self_handler.command == "GET" and "/teams/name/" in self_handler.path:
+                call_count["get"] += 1
+                if call_count["get"] == 1:
+                    # First GET: not found
+                    self_handler.send_response(404)
+                    self_handler.send_header("Content-Type", "application/json")
+                    self_handler.end_headers()
+                    self_handler.wfile.write(json.dumps({"message": "not found"}).encode())
+                    return
+                else:
+                    # Second GET: found (created by another process)
+                    self_handler.send_response(200)
+                    self_handler.send_header("Content-Type", "application/json")
+                    self_handler.end_headers()
+                    self_handler.wfile.write(json.dumps({"id": "raced_team"}).encode())
+                    return
+            if self_handler.command == "POST" and "/teams" in self_handler.path:
+                content_length = int(self_handler.headers.get("Content-Length", 0))
+                if content_length > 0:
+                    self_handler.rfile.read(content_length)
+                self_handler.send_response(409)
+                self_handler.send_header("Content-Type", "application/json")
+                self_handler.end_headers()
+                self_handler.wfile.write(json.dumps({"message": "already exists"}).encode())
+                return
+            original_handle(self_handler)
+
+        _MockHandler._handle = _patched_handle
+        _MockHandler.do_GET = _patched_handle
+        _MockHandler.do_POST = _patched_handle
+        try:
+            team_id = mc.get_or_create_team("eng", "Engineering")
+            assert team_id == "raced_team"
+        finally:
+            _MockHandler._handle = original_handle
+            _MockHandler.do_GET = original_handle
+            _MockHandler.do_POST = original_handle

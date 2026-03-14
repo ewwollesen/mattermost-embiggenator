@@ -15,7 +15,7 @@ def generate_groups(
     """Generate groups and assign random user memberships."""
     fake = Faker()
     if config.seed is not None:
-        Faker.seed(config.seed + 1000)  # Offset to avoid same sequence as users
+        fake.seed_instance(config.seed + 1000)  # Offset to avoid same sequence as users
 
     groups: list[GeneratedGroup] = []
     seen_cns: set[str] = set()

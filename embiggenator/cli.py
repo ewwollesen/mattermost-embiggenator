@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
-import json
+from typing import TYPE_CHECKING
 
 import click
+
+if TYPE_CHECKING:
+    from embiggenator.output.mattermost_client import MattermostClient
 
 from embiggenator.config import Config, build_config
 from embiggenator.generators.groups import generate_groups
@@ -54,6 +57,7 @@ def _add_common_options(func):
 
 
 def _build_config_and_generate(
+    *,
     config_file, users, groups, members_per_group, base_dn, email_domain,
     default_password, password_scheme, seed, abac_inline, abac_profile,
     no_defaults=False,
@@ -101,8 +105,10 @@ def generate_ldif_cmd(
 ) -> None:
     """Generate LDIF files to mount into the OpenLDAP container."""
     cfg, generated_users, generated_groups = _build_config_and_generate(
-        config_file, users, groups, members_per_group, base_dn, email_domain,
-        default_password, password_scheme, seed, abac_inline, abac_profile,
+        config_file=config_file, users=users, groups=groups,
+        members_per_group=members_per_group, base_dn=base_dn, email_domain=email_domain,
+        default_password=default_password, password_scheme=password_scheme,
+        seed=seed, abac_inline=abac_inline, abac_profile=abac_profile,
         no_defaults=no_defaults,
     )
 
@@ -131,8 +137,10 @@ def populate_cmd(
     from embiggenator.output.ldap_writer import login_mattermost_users, populate_ldap
 
     cfg, generated_users, generated_groups = _build_config_and_generate(
-        config_file, users, groups, members_per_group, base_dn, email_domain,
-        default_password, password_scheme, seed, abac_inline, abac_profile,
+        config_file=config_file, users=users, groups=groups,
+        members_per_group=members_per_group, base_dn=base_dn, email_domain=email_domain,
+        default_password=default_password, password_scheme=password_scheme,
+        seed=seed, abac_inline=abac_inline, abac_profile=abac_profile,
     )
 
     populate_ldap(
@@ -184,6 +192,10 @@ def content_cmd(config_file, pat, mattermost_url, seed) -> None:
 
     Requires a running Mattermost server with LDAP users already logged in.
     Uses the PAT (Personal Access Token) for API authentication.
+
+    Note: All API actions are performed using the admin PAT, so Mattermost will
+    attribute posts/reactions to the PAT owner. For realistic per-user authorship,
+    use 'run-all' which captures individual session tokens during login.
     """
     from embiggenator.generators.content import PassageBank
     from embiggenator.generators.mattermost import generate_mattermost_content
@@ -206,10 +218,9 @@ def content_cmd(config_file, pat, mattermost_url, seed) -> None:
     click.echo(f"Connecting to Mattermost at {cfg.mattermost.url}...")
     client = MattermostClient(cfg.mattermost.url, cfg.mattermost.pat)
 
-    # Build user map by looking up generated users on Mattermost
-    click.echo("Looking up users on Mattermost...")
-    generated_users = generate_users(cfg)
-    user_map = _build_user_map_from_pat(client, generated_users)
+    # Build user map by fetching all users from Mattermost
+    click.echo("Fetching users from Mattermost...")
+    user_map = _build_user_map_from_pat(client)
     click.echo(f"Found {len(user_map)} users on Mattermost")
 
     if not user_map:
@@ -257,8 +268,10 @@ def run_all_cmd(
     from embiggenator.output.mattermost_client import MattermostClient
 
     cfg, generated_users, generated_groups = _build_config_and_generate(
-        config_file, users, groups, members_per_group, base_dn, email_domain,
-        default_password, password_scheme, seed, abac_inline, abac_profile,
+        config_file=config_file, users=users, groups=groups,
+        members_per_group=members_per_group, base_dn=base_dn, email_domain=email_domain,
+        default_password=default_password, password_scheme=password_scheme,
+        seed=seed, abac_inline=abac_inline, abac_profile=abac_profile,
     )
 
     if pat:
@@ -310,25 +323,22 @@ def run_all_cmd(
 
 
 def _build_user_map_from_pat(
-    client,
-    generated_users,
+    client: MattermostClient,
 ) -> dict[str, tuple[str, str]]:
-    """Build a user map by looking up generated users on Mattermost via the PAT.
+    """Build a user map by fetching all users from Mattermost via the PAT.
 
-    Uses the admin PAT for all API calls. Each user entry maps
-    uid -> (mm_user_id, pat_token) where pat_token is the admin PAT
-    (since we use it for all operations).
+    Fetches users in batch via the paginated API. Excludes bot accounts and
+    deactivated users. Each entry maps username -> (mm_user_id, pat_token)
+    where pat_token is the admin PAT (used for all operations).
     """
-    from embiggenator.output.mattermost_client import MattermostAPIError
-
     user_map: dict[str, tuple[str, str]] = {}
-    for user in generated_users:
-        try:
-            mm_user = client.get_user_by_username(user.uid)
-            if mm_user:
-                user_map[user.uid] = (mm_user["id"], client.token)
-        except MattermostAPIError:
-            pass
+    for mm_user in client.get_all_users():
+        # Skip bots and deactivated users
+        if mm_user.get("is_bot") or mm_user.get("delete_at", 0) > 0:
+            continue
+        username = mm_user.get("username", "")
+        if username:
+            user_map[username] = (mm_user["id"], client.token)
     return user_map
 
 
@@ -355,29 +365,31 @@ def show_config_cmd(config_file) -> None:
             weights = f" (weights: {attr.weights})" if attr.weights else ""
             click.echo(f"    - {attr.name}: {attr.values}{weights}")
     # Mattermost section
-    click.echo(f"  mattermost:")
+    click.echo("  mattermost:")
     click.echo(f"    url:            {cfg.mattermost.url}")
     click.echo(f"    pat:            {'***' if cfg.mattermost.pat else '(not set)'}")
     # Content section
+    click.echo("  content:")
+    if cfg.content.channels_min is not None:
+        click.echo(f"    channels: {cfg.content.channels_min}-{cfg.content.channels_max} (distributed across teams)")
+    else:
+        click.echo(f"    channels_per_team: {cfg.content.channels_per_team_min}-{cfg.content.channels_per_team_max}")
+    click.echo(f"    private_channel_probability: {cfg.content.private_channel_probability}")
+    click.echo(f"    members_per_channel: {cfg.content.members_per_channel_min}-{cfg.content.members_per_channel_max}")
+    click.echo(f"    posts_per_channel: {cfg.content.posts_per_channel_min}-{cfg.content.posts_per_channel_max}")
+    click.echo(f"    reply_probability: {cfg.content.reply_probability}")
+    click.echo(f"    replies_per_thread: {cfg.content.replies_per_thread_min}-{cfg.content.replies_per_thread_max}")
+    click.echo(f"    reaction_probability: {cfg.content.reaction_probability}")
+    click.echo(f"    reactions_per_post: {cfg.content.reactions_per_post_min}-{cfg.content.reactions_per_post_max}")
+    click.echo(f"    direct_messages: {cfg.content.direct_messages_min}-{cfg.content.direct_messages_max}")
+    click.echo(f"    dms_per_conversation: {cfg.content.dms_per_conversation_min}-{cfg.content.dms_per_conversation_max}")
     if cfg.content.teams:
-        click.echo(f"  content:")
-        if cfg.content.channels_min is not None:
-            click.echo(f"    channels: {cfg.content.channels_min}-{cfg.content.channels_max} (distributed across teams)")
-        else:
-            click.echo(f"    channels_per_team: {cfg.content.channels_per_team_min}-{cfg.content.channels_per_team_max}")
-        click.echo(f"    private_channel_probability: {cfg.content.private_channel_probability}")
-        click.echo(f"    members_per_channel: {cfg.content.members_per_channel_min}-{cfg.content.members_per_channel_max}")
-        click.echo(f"    posts_per_channel: {cfg.content.posts_per_channel_min}-{cfg.content.posts_per_channel_max}")
-        click.echo(f"    reply_probability: {cfg.content.reply_probability}")
-        click.echo(f"    replies_per_thread: {cfg.content.replies_per_thread_min}-{cfg.content.replies_per_thread_max}")
-        click.echo(f"    reaction_probability: {cfg.content.reaction_probability}")
-        click.echo(f"    reactions_per_post: {cfg.content.reactions_per_post_min}-{cfg.content.reactions_per_post_max}")
-        click.echo(f"    direct_messages: {cfg.content.direct_messages_min}-{cfg.content.direct_messages_max}")
-        click.echo(f"    dms_per_conversation: {cfg.content.dms_per_conversation_min}-{cfg.content.dms_per_conversation_max}")
-        click.echo(f"    teams:")
+        click.echo("    teams:")
         for team in cfg.content.teams:
             override = ""
             if team.channels_per_team_min is not None:
                 override = f", channels_per_team: {team.channels_per_team_min}-{team.channels_per_team_max}"
             explicit = f", {len(team.channels)} explicit" if team.channels else ""
             click.echo(f"      - {team.display_name} ({team.name}{override}{explicit})")
+    else:
+        click.echo("    teams: (none configured)")

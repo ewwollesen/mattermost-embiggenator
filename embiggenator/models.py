@@ -92,6 +92,8 @@ def _escape_dn_value(value: str) -> str:
     """Escape special characters in a DN attribute value (RFC 4514)."""
     # Characters that must be escaped in DN values
     result = value.replace("\\", "\\\\")
+    # NUL character (RFC 4514)
+    result = result.replace("\x00", "\\00")
     result = result.replace(",", "\\,")
     result = result.replace("+", "\\+")
     result = result.replace('"', '\\"')

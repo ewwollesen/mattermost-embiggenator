@@ -27,6 +27,7 @@ class MattermostClient:
 
     MAX_RETRIES = 3
     BACKOFF_BASE = 1.0  # seconds
+    MAX_RETRY_WAIT = 30.0  # cap Retry-After to avoid unbounded sleep
 
     def __init__(self, base_url: str, token: str) -> None:
         self.base_url = base_url.rstrip("/")
@@ -63,6 +64,7 @@ class MattermostClient:
             except urllib.error.HTTPError as e:
                 if e.code == 429 and attempt < self.MAX_RETRIES:
                     retry_after = float(e.headers.get("Retry-After", self.BACKOFF_BASE * (2 ** attempt)))
+                    retry_after = min(retry_after, self.MAX_RETRY_WAIT)
                     time.sleep(retry_after)
                     continue
                 body_text = e.read().decode("utf-8", errors="replace")
@@ -95,7 +97,15 @@ class MattermostClient:
         existing = self.get_team_by_name(name)
         if existing:
             return existing["id"]
-        return self.create_team(name, display_name, team_type)
+        try:
+            return self.create_team(name, display_name, team_type)
+        except MattermostAPIError as e:
+            # Handle race: another process created it between our GET and POST
+            if e.status == 409:
+                existing = self.get_team_by_name(name)
+                if existing:
+                    return existing["id"]
+            raise
 
     # ── Channels ──
 
@@ -127,7 +137,15 @@ class MattermostClient:
         existing = self.get_channel_by_name(team_id, name)
         if existing:
             return existing["id"]
-        return self.create_channel(team_id, name, display_name, channel_type)
+        try:
+            return self.create_channel(team_id, name, display_name, channel_type)
+        except MattermostAPIError as e:
+            # Handle race: another process created it between our GET and POST
+            if e.status == 409:
+                existing = self.get_channel_by_name(team_id, name)
+                if existing:
+                    return existing["id"]
+            raise
 
     def create_direct_channel(self, user_id_1: str, user_id_2: str) -> str:
         """Create (or get) a direct message channel between two users. Returns channel_id."""
@@ -207,3 +225,24 @@ class MattermostClient:
             if e.status == 404:
                 return None
             raise
+
+    def get_users_by_usernames(self, usernames: list[str]) -> list[dict]:
+        """Batch lookup users by username. Returns list of user dicts for found users."""
+        if not usernames:
+            return []
+        result = self._request("POST", "/users/usernames", usernames)
+        return result or []
+
+    def get_all_users(self, per_page: int = 200) -> list[dict]:
+        """Fetch all users via paginated API calls. Returns list of user dicts."""
+        all_users: list[dict] = []
+        page = 0
+        while True:
+            batch = self._request("GET", f"/users?page={page}&per_page={per_page}")
+            if not batch:
+                break
+            all_users.extend(batch)
+            if len(batch) < per_page:
+                break
+            page += 1
+        return all_users

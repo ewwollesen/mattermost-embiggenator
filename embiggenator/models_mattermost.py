@@ -1,46 +1,8 @@
-"""Dataclasses for Mattermost content generation planning."""
+"""Dataclasses for Mattermost content generation results."""
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-
-
-@dataclass
-class ChannelPlan:
-    """Plan for a single channel's content."""
-
-    channel_id: str
-    channel_name: str
-    team_id: str
-    member_uids: list[str]  # UIDs of users who are members
-
-
-@dataclass
-class PostPlan:
-    """Plan for a single post or reply."""
-
-    channel_id: str
-    author_uid: str
-    message: str
-    root_id: str = ""  # non-empty for threaded replies
-
-
-@dataclass
-class ReactionPlan:
-    """Plan for a single emoji reaction."""
-
-    post_id: str
-    user_uid: str
-    emoji_name: str
-
-
-@dataclass
-class DMConversation:
-    """Plan for a direct message conversation between two users."""
-
-    user_uid_1: str
-    user_uid_2: str
-    messages: list[tuple[str, str]]  # list of (author_uid, message_text)
+from dataclasses import dataclass
 
 
 @dataclass

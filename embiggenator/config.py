@@ -20,10 +20,14 @@ class AbacAttribute:
     weights: list[int] | None = None
 
     def __post_init__(self) -> None:
-        if self.weights and len(self.weights) != len(self.values):
+        if self.weights is not None and len(self.weights) != len(self.values):
             raise ValueError(
                 f"ABAC attribute '{self.name}': "
                 f"weights length ({len(self.weights)}) != values length ({len(self.values)})"
+            )
+        if self.weights is not None and sum(self.weights) <= 0:
+            raise ValueError(
+                f"ABAC attribute '{self.name}': weights must sum to > 0"
             )
 
 
@@ -88,6 +92,33 @@ class ContentConfig:
     dms_per_conversation_min: int = 3
     dms_per_conversation_max: int = 10
 
+    def __post_init__(self) -> None:
+        if (self.channels_min is None) != (self.channels_max is None):
+            raise ValueError(
+                "channels_min and channels_max must both be set or both be None"
+            )
+        for name in ("reply_probability", "reaction_probability", "private_channel_probability"):
+            val = getattr(self, name)
+            if not 0.0 <= val <= 1.0:
+                raise ValueError(f"{name} must be between 0.0 and 1.0, got {val}")
+        # Validate all min/max range pairs
+        _range_pairs = [
+            ("channels_per_team_min", "channels_per_team_max"),
+            ("members_per_channel_min", "members_per_channel_max"),
+            ("posts_per_channel_min", "posts_per_channel_max"),
+            ("replies_per_thread_min", "replies_per_thread_max"),
+            ("reactions_per_post_min", "reactions_per_post_max"),
+            ("direct_messages_min", "direct_messages_max"),
+            ("dms_per_conversation_min", "dms_per_conversation_max"),
+        ]
+        if self.channels_min is not None:
+            _range_pairs.append(("channels_min", "channels_max"))
+        for min_name, max_name in _range_pairs:
+            lo, hi = getattr(self, min_name), getattr(self, max_name)
+            if lo > hi:
+                label = min_name.removesuffix("_min")
+                raise ValueError(f"{label}: min ({lo}) > max ({hi})")
+
 
 DEFAULT_ABAC_ATTRIBUTES = [
     AbacAttribute(
@@ -150,11 +181,19 @@ def expand_env_vars(value: str) -> str:
 
 
 def parse_range(value: str | int | float) -> tuple[int, int]:
-    """Parse a range value like '10', '5-20', or a bare integer."""
-    s = str(value)
-    if "-" in s:
-        parts = s.split("-", 1)
-        lo, hi = int(parts[0]), int(parts[1])
+    """Parse a range value like '10', '5-20', or a bare integer.
+
+    Handles negative numbers correctly: '-5' is a single value,
+    '5-20' is a range, '-5-20' is -5 to 20.
+    """
+    if isinstance(value, (int, float)):
+        n = int(value)
+        return n, n
+    s = str(value).strip()
+    # Find the range separator: a hyphen that is NOT at position 0 (negative sign)
+    sep_idx = s.find("-", 1)
+    if sep_idx > 0:
+        lo, hi = int(s[:sep_idx]), int(s[sep_idx + 1:])
         if lo > hi:
             raise ValueError(f"Invalid range: {lo} > {hi}")
         return lo, hi
@@ -162,16 +201,8 @@ def parse_range(value: str | int | float) -> tuple[int, int]:
     return n, n
 
 
-def parse_members_range(value: str) -> tuple[int, int]:
-    """Parse a members-per-group value like '10' or '5-20'."""
-    if "-" in str(value):
-        parts = str(value).split("-", 1)
-        lo, hi = int(parts[0]), int(parts[1])
-        if lo > hi:
-            raise ValueError(f"Invalid range: {lo} > {hi}")
-        return lo, hi
-    n = int(value)
-    return n, n
+# Backwards-compatible alias
+parse_members_range = parse_range
 
 
 def parse_abac_inline(abac_str: str) -> list[AbacAttribute]:

@@ -14,7 +14,7 @@ def generate_users(config: Config) -> list[GeneratedUser]:
     """Generate the requested number of unique LDAP users."""
     fake = Faker()
     if config.seed is not None:
-        Faker.seed(config.seed)
+        fake.seed_instance(config.seed)
 
     users: list[GeneratedUser] = []
     seen_uids: set[str] = set()

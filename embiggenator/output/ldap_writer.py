@@ -26,9 +26,7 @@ def populate_ldap(
 ) -> None:
     """Connect to a running LDAP server and add generated entries."""
     server = Server(host, port=port, use_ssl=use_ssl, get_info=ALL)
-    conn = Connection(server, user=bind_dn, password=bind_password, auto_bind=True)
-
-    try:
+    with Connection(server, user=bind_dn, password=bind_password, auto_bind=True) as conn:
         # Add users first (groups reference them)
         added_users = 0
         skipped_users = 0
@@ -54,9 +52,6 @@ def populate_ldap(
                 skipped_groups += 1
 
         click.echo(f"Groups: {added_groups} added, {skipped_groups} skipped (already exist)")
-
-    finally:
-        conn.unbind()
 
 
 def login_mattermost_users(
@@ -94,15 +89,12 @@ def login_mattermost_users(
                     if mm_user_id and token:
                         user_map[user.uid] = (mm_user_id, token)
         except urllib.error.HTTPError as e:
-            if e.code == 200:
-                logged_in += 1
-            else:
-                failed += 1
-                if failed <= 3:
-                    body = e.read().decode("utf-8", errors="replace")
-                    click.echo(f"  Login failed for {user.uid}: HTTP {e.code} — {body}")
-                elif failed == 4:
-                    click.echo("  (suppressing further login errors)")
+            failed += 1
+            if failed <= 3:
+                body = e.read().decode("utf-8", errors="replace")
+                click.echo(f"  Login failed for {user.uid}: HTTP {e.code} — {body}")
+            elif failed == 4:
+                click.echo("  (suppressing further login errors)")
         except urllib.error.URLError as e:
             failed += 1
             if failed == 1:
@@ -126,11 +118,9 @@ def reset_ldap(
 ) -> None:
     """Delete all entries under the people OU, then optionally restore built-in defaults."""
     server = Server(host, port=port, use_ssl=use_ssl, get_info=ALL)
-    conn = Connection(server, user=bind_dn, password=bind_password, auto_bind=True)
-
     people_dn = f"ou={people_ou},{base_dn}"
 
-    try:
+    with Connection(server, user=bind_dn, password=bind_password, auto_bind=True) as conn:
         # Search for all entries under the people OU
         conn.search(people_dn, "(objectClass=*)", search_scope=SUBTREE)
         entries = [entry.entry_dn for entry in conn.entries]
@@ -170,9 +160,6 @@ def reset_ldap(
 
             click.echo(f"Restored {restored} built-in entries")
 
-    finally:
-        conn.unbind()
-
 
 def _parse_ldif_file(path: Path) -> list[tuple[str, dict[str, list[str | bytes]]]]:
     """Parse a simple LDIF file into (dn, attributes) tuples."""
@@ -192,7 +179,9 @@ def _parse_ldif_file(path: Path) -> list[tuple[str, dict[str, list[str | bytes]]
 
     for line in unfolded:
         line = line.strip()
-        if not line or line.startswith("#"):
+        if line.startswith("#"):
+            continue  # Skip comments without affecting entry boundaries
+        if not line:
             # Blank line = end of entry
             if current_dn is not None:
                 entries.append((current_dn, current_attrs))
@@ -200,16 +189,21 @@ def _parse_ldif_file(path: Path) -> list[tuple[str, dict[str, list[str | bytes]]
                 current_attrs = {}
             continue
 
-        if ":: " in line:
+        colon_idx = line.find(":")
+        if colon_idx < 1:
+            continue  # Malformed line
+        if line[colon_idx:colon_idx + 3] == ":: ":
             # Base64-encoded value
-            attr_name, _, b64_value = line.partition(":: ")
+            attr_name = line[:colon_idx]
+            b64_value = line[colon_idx + 3:]
             value = base64.b64decode(b64_value)
             if attr_name.lower() == "dn":
                 current_dn = value.decode("utf-8")
             else:
                 current_attrs.setdefault(attr_name, []).append(value)
-        elif ": " in line:
-            attr_name, _, value = line.partition(": ")
+        elif line[colon_idx:colon_idx + 2] == ": ":
+            attr_name = line[:colon_idx]
+            value = line[colon_idx + 2:]
             if attr_name.lower() == "dn":
                 current_dn = value
             else:

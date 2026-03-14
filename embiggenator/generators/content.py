@@ -29,6 +29,10 @@ class PassageBank:
             self._paragraphs.extend(_parse_paragraphs(txt_file))
         if not self._paragraphs:
             raise RuntimeError(f"No usable paragraphs found in {text_dir}")
+        # Pre-filter short paragraphs for reply use
+        self._short_paragraphs: list[str] = [p for p in self._paragraphs if len(p) < 500]
+        if not self._short_paragraphs:
+            self._short_paragraphs = self._paragraphs
 
     @property
     def count(self) -> int:
@@ -47,11 +51,7 @@ class PassageBank:
 
     def get_short_reply(self, rng: random.Random) -> str:
         """Return a single short paragraph suitable for a thread reply."""
-        # Prefer shorter paragraphs for replies
-        short = [p for p in self._paragraphs if len(p) < 500]
-        if not short:
-            short = self._paragraphs
-        return rng.choice(short)
+        return rng.choice(self._short_paragraphs)
 
 
 def _parse_paragraphs(path: Path) -> list[str]:
