@@ -12,7 +12,7 @@ Built for the [`rroemhild/docker-test-openldap`](https://github.com/rroemhild/do
 - Logs in newly created LDAP users to Mattermost so they appear in the instance
 - Creates Mattermost teams and adds users to them
 - Creates a configurable number of public and private channels
-- Populates channels with posts using passages from Pride and Prejudice and Wuthering Heights
+- Populates channels with realistic post content
 - Generates threaded replies and emoji reactions on posts
 - Creates direct message conversations between random user pairs
 - Supports deterministic, reproducible output via `--seed`
@@ -433,3 +433,8 @@ python -m embiggenator generate-ldif -u 50 -o ./data
 pip install pytest
 pytest
 ```
+
+## Acknowledgments
+
+- [Robin Roemhild](https://github.com/rroemhild) for the [`docker-test-openldap`](https://github.com/rroemhild/docker-test-openldap) image that Embiggenator is built around
+- Jane Austen and Emily Bront\u00eb, for the post content
