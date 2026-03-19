@@ -84,6 +84,41 @@ class TestCreateTeam:
         assert body["type"] == "O"
 
 
+class TestGetAllTeams:
+    def test_single_page(self, client):
+        mc, handler = client
+        teams = [{"id": f"t{i}", "name": f"team{i}"} for i in range(3)]
+        handler.responses[("GET", "/api/v4/teams")] = (200, teams)
+        result = mc.get_all_teams(per_page=200)
+        assert len(result) == 3
+
+    def test_empty_server(self, client):
+        mc, handler = client
+        handler.responses[("GET", "/api/v4/teams")] = (200, [])
+        result = mc.get_all_teams()
+        assert result == []
+
+
+class TestDeleteTeam:
+    def test_deletes_permanently(self, client):
+        mc, handler = client
+        handler.responses[("DELETE", "/api/v4/teams/")] = (200, {"status": "OK"})
+        mc.delete_team("team123", permanent=True)
+        assert len(handler.requests) == 1
+        method, path, _ = handler.requests[0]
+        assert method == "DELETE"
+        assert "/teams/team123" in path
+        assert "permanent=true" in path
+
+    def test_deletes_non_permanently(self, client):
+        mc, handler = client
+        handler.responses[("DELETE", "/api/v4/teams/")] = (200, {"status": "OK"})
+        mc.delete_team("team123", permanent=False)
+        method, path, _ = handler.requests[0]
+        assert method == "DELETE"
+        assert "permanent" not in path
+
+
 class TestGetTeamByName:
     def test_returns_team(self, client):
         mc, handler = client

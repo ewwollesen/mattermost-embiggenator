@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import ssl
 import time
 import urllib.error
 import urllib.request
@@ -28,10 +29,16 @@ class MattermostClient:
     MAX_RETRIES = 3
     BACKOFF_BASE = 1.0  # seconds
     MAX_RETRY_WAIT = 30.0  # cap Retry-After to avoid unbounded sleep
+    MAX_PAGES = 1000  # safety limit on paginated fetches
 
-    def __init__(self, base_url: str, token: str) -> None:
+    def __init__(self, base_url: str, token: str, *, verify_ssl: bool = True) -> None:
         self.base_url = base_url.rstrip("/")
         self.token = token
+        self._ssl_context: ssl.SSLContext | None = None
+        if not verify_ssl:
+            self._ssl_context = ssl.create_default_context()
+            self._ssl_context.check_hostname = False
+            self._ssl_context.verify_mode = ssl.CERT_NONE
 
     def _request(
         self,
@@ -56,7 +63,7 @@ class MattermostClient:
                 method=method,
             )
             try:
-                with urllib.request.urlopen(req) as resp:
+                with urllib.request.urlopen(req, context=self._ssl_context) as resp:
                     resp_body = resp.read().decode("utf-8")
                     if resp_body:
                         return json.loads(resp_body)
@@ -67,8 +74,8 @@ class MattermostClient:
                     retry_after = min(retry_after, self.MAX_RETRY_WAIT)
                     time.sleep(retry_after)
                     continue
-                body_text = e.read().decode("utf-8", errors="replace")
-                raise MattermostAPIError(e.code, body_text, url) from e
+                error_body = e.read().decode("utf-8", errors="replace")
+                raise MattermostAPIError(e.code, error_body, url) from e
         # Should not reach here, but just in case
         raise MattermostAPIError(429, "Rate limit exceeded after retries", url)
 
@@ -87,7 +94,7 @@ class MattermostClient:
         """Fetch all teams via paginated API calls. Returns list of team dicts."""
         all_teams: list[dict] = []
         page = 0
-        while True:
+        while page < self.MAX_PAGES:
             batch = self._request("GET", f"/teams?page={page}&per_page={per_page}")
             if not batch:
                 break
@@ -247,7 +254,10 @@ class MattermostClient:
         return self._request("GET", "/config")
 
     def patch_config(self, config_patch: dict) -> dict:
-        """Partially update the server configuration. Requires system admin permissions."""
+        """Partially update the server configuration. Requires system admin permissions.
+
+        Note: Mattermost uses PUT /config/patch (not HTTP PATCH).
+        """
         return self._request("PUT", "/config/patch", config_patch)
 
     # ── Users ──
@@ -277,7 +287,7 @@ class MattermostClient:
         """Fetch all users via paginated API calls. Returns list of user dicts."""
         all_users: list[dict] = []
         page = 0
-        while True:
+        while page < self.MAX_PAGES:
             batch = self._request("GET", f"/users?page={page}&per_page={per_page}")
             if not batch:
                 break

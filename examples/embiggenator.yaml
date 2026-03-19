@@ -16,3 +16,30 @@ abac:
     - name: employeeType
       values: ["Full-Time", "Part-Time", "Contractor", "Intern"]
       weights: [60, 15, 15, 10]
+
+mattermost:
+  url: http://localhost:8065
+  pat: "${MM_PAT}"
+
+content:
+  teams:
+    - name: engineering
+      display_name: Engineering
+      channels_per_team: 5-10
+      channels:
+        - name: general
+          display_name: General
+        - name: backend
+          display_name: Backend
+    - name: sales
+      display_name: Sales
+  channels_per_team: 3-8
+  private_channel_probability: 0.2
+  members_per_channel: 5-50
+  posts_per_channel: 20-50
+  reply_probability: 0.3
+  replies_per_thread: 1-5
+  reaction_probability: 0.2
+  reactions_per_post: 1-3
+  direct_messages: 10-30
+  dms_per_conversation: 3-10

@@ -118,7 +118,7 @@ def preflight_check_max_users_per_team(
             raise click.ClickException(
                 "Unable to update MaxUsersPerTeam (403 Forbidden). "
                 "Your PAT needs system admin permissions to change server config."
-            )
+            ) from None
         raise
 
     click.echo(f"  MaxUsersPerTeam updated to {user_count}.")

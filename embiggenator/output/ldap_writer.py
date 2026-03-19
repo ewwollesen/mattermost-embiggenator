@@ -36,6 +36,8 @@ def populate_ldap(
             try:
                 conn.add(user.dn, attributes=attrs)
                 added_users += 1
+                if added_users % 25 == 0:
+                    click.echo(f"  Added {added_users} users...")
             except LDAPEntryAlreadyExistsResult:
                 skipped_users += 1
 
@@ -84,6 +86,8 @@ def login_mattermost_users(
             with urllib.request.urlopen(req) as resp:
                 if resp.status == 200:
                     logged_in += 1
+                    if logged_in % 25 == 0:
+                        click.echo(f"  Logged in {logged_in} users...")
                     token = resp.headers.get("Token", "")
                     body = json.loads(resp.read().decode("utf-8"))
                     mm_user_id = body.get("id", "")
@@ -274,6 +278,7 @@ def disable_ldap_user(
     server = Server(host, port=port, use_ssl=use_ssl, get_info=ALL)
     people_dn = f"ou={people_ou},{base_dn}"
 
+    # raise_exceptions=True ensures conn.modify raises on failure
     with Connection(server, user=bind_dn, password=bind_password, auto_bind=True, raise_exceptions=True) as conn:
         dn = _find_user_by_uid(conn, people_dn, username)
         if dn is None:
@@ -298,19 +303,20 @@ def update_ldap_user(
     server = Server(host, port=port, use_ssl=use_ssl, get_info=ALL)
     people_dn = f"ou={people_ou},{base_dn}"
 
+    # raise_exceptions=True ensures conn.modify/modify_dn raise on failure
     with Connection(server, user=bind_dn, password=bind_password, auto_bind=True, raise_exceptions=True) as conn:
         dn = _find_user_by_uid(conn, people_dn, username)
         if dn is None:
             raise click.ClickException(f"User '{username}' not found in LDAP under {people_dn}")
 
         # Separate cn from other attributes — cn requires a DN rename
-        new_cn = changes.pop("cn", None)
-        non_cn_changes = {attr: [(MODIFY_REPLACE, [val])] for attr, val in changes.items()}
+        new_cn = changes.get("cn")
+        non_cn_changes = {attr: [(MODIFY_REPLACE, [val])] for attr, val in changes.items() if attr != "cn"}
 
         # Apply non-cn attribute changes first (on the current DN)
         if non_cn_changes:
             conn.modify(dn, non_cn_changes)
-            click.echo(f"Updated attributes on '{username}': {', '.join(changes)}")
+            click.echo(f"Updated attributes on '{username}': {', '.join(non_cn_changes)}")
 
         # Rename DN if cn changed
         if new_cn is not None:

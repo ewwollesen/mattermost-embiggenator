@@ -55,8 +55,8 @@ class TestFindUserByUid:
         conn = _mock_conn_no_user()
         _find_user_by_uid(conn, "ou=people,dc=example,dc=com", "user(with)parens")
         search_filter = conn.search.call_args[0][1]
-        # ldap3 escape_filter_chars escapes parentheses
-        assert "(" not in search_filter.split("=", 1)[1] or "\\28" in search_filter
+        # ldap3 escape_filter_chars escapes ( as \28 and ) as \29
+        assert "\\28" in search_filter and "\\29" in search_filter
 
 
 # ── disable_ldap_user ──

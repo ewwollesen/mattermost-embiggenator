@@ -179,8 +179,9 @@ def populate_cmd(
 @click.option("--no-restore", is_flag=True, default=False, help="Don't restore built-in default entries after clearing")
 @click.option("--mattermost-url", type=str, default=None, help="Mattermost URL — also delete all non-admin users from Mattermost")
 @click.option("--pat", type=str, default=None, help="Mattermost Personal Access Token (required with --mattermost-url)")
+@click.option("--skip-verify-ssl", is_flag=True, default=False, help="Skip TLS certificate verification (for self-signed certs)")
 @click.confirmation_option(prompt="This will delete ALL entries under ou=people. Continue?")
-def reset_cmd(host, port, bind_dn, bind_password, use_ssl, base_dn, no_restore, mattermost_url, pat) -> None:
+def reset_cmd(host, port, bind_dn, bind_password, use_ssl, base_dn, no_restore, mattermost_url, pat, skip_verify_ssl) -> None:
     """Delete all entries and optionally restore built-in defaults.
 
     If --mattermost-url and --pat are provided, also permanently deletes all
@@ -189,16 +190,9 @@ def reset_cmd(host, port, bind_dn, bind_password, use_ssl, base_dn, no_restore, 
     """
     from embiggenator.output.ldap_writer import reset_ldap
 
-    reset_ldap(
-        base_dn=base_dn,
-        host=host,
-        port=port,
-        bind_dn=bind_dn or f"cn=admin,{base_dn}",
-        bind_password=bind_password or "GoodNewsEveryone",
-        use_ssl=use_ssl,
-        restore_defaults=not no_restore,
-    )
-
+    # Validate Mattermost options BEFORE touching LDAP so a bad PAT or missing
+    # server config doesn't leave LDAP wiped with Mattermost untouched.
+    client = None
     if mattermost_url and not pat:
         raise click.ClickException("--pat is required when using --mattermost-url with reset")
 
@@ -207,8 +201,7 @@ def reset_cmd(host, port, bind_dn, bind_password, use_ssl, base_dn, no_restore, 
 
         from embiggenator.output.mattermost_client import MattermostAPIError, MattermostClient
 
-        click.echo(f"\nDeleting Mattermost users at {mattermost_url}...")
-        client = MattermostClient(mattermost_url, pat)
+        client = MattermostClient(mattermost_url, pat, verify_ssl=not skip_verify_ssl)
         _validate_pat(client)
 
         # Preflight: check that API user/team deletion is enabled
@@ -237,6 +230,23 @@ def reset_cmd(host, port, bind_dn, bind_password, use_ssl, base_dn, no_restore, 
         except urllib.error.URLError as e:
             raise click.ClickException(f"Cannot reach Mattermost at {mattermost_url}: {e.reason}") from None
 
+    reset_ldap(
+        base_dn=base_dn,
+        host=host,
+        port=port,
+        bind_dn=bind_dn or f"cn=admin,{base_dn}",
+        bind_password=bind_password or "GoodNewsEveryone",
+        use_ssl=use_ssl,
+        restore_defaults=not no_restore,
+    )
+
+    if client is not None:
+        import urllib.error
+
+        from embiggenator.output.mattermost_client import MattermostAPIError
+
+        click.echo(f"\nDeleting Mattermost users at {mattermost_url}...")
+
         try:
             all_users = client.get_all_users()
         except urllib.error.URLError as e:
@@ -250,12 +260,14 @@ def reset_cmd(host, port, bind_dn, bind_password, use_ssl, base_dn, no_restore, 
                 skipped += 1
                 continue
             roles = user.get("roles", "")
-            if "system_admin" in roles:
+            if "system_admin" in roles.split():
                 skipped += 1
                 continue
             try:
                 client.delete_user(user["id"], permanent=True)
                 deleted += 1
+                if deleted % 25 == 0:
+                    click.echo(f"  Deleted {deleted} users...")
             except MattermostAPIError as e:
                 errors += 1
                 if errors <= 3:
@@ -274,6 +286,8 @@ def reset_cmd(host, port, bind_dn, bind_password, use_ssl, base_dn, no_restore, 
             try:
                 client.delete_team(team["id"], permanent=True)
                 teams_deleted += 1
+                if teams_deleted % 25 == 0:
+                    click.echo(f"  Deleted {teams_deleted} teams...")
             except MattermostAPIError as e:
                 teams_errors += 1
                 if teams_errors <= 3:
@@ -305,16 +319,23 @@ def disable_user_cmd(host, port, bind_dn, bind_password, use_ssl, base_dn, usern
     """
     from embiggenator.output.ldap_writer import disable_ldap_user
 
+    failures = 0
     for username in usernames:
-        disable_ldap_user(
-            username,
-            base_dn=base_dn,
-            host=host,
-            port=port,
-            bind_dn=bind_dn or f"cn=admin,{base_dn}",
-            bind_password=bind_password or "GoodNewsEveryone",
-            use_ssl=use_ssl,
-        )
+        try:
+            disable_ldap_user(
+                username,
+                base_dn=base_dn,
+                host=host,
+                port=port,
+                bind_dn=bind_dn or f"cn=admin,{base_dn}",
+                bind_password=bind_password or "GoodNewsEveryone",
+                use_ssl=use_ssl,
+            )
+        except click.ClickException as e:
+            click.echo(f"Error: {e.message}", err=True)
+            failures += 1
+    if failures:
+        raise SystemExit(1)
 
 
 @cli.command("update-user")
@@ -361,7 +382,8 @@ def update_user_cmd(host, port, bind_dn, bind_password, use_ssl, base_dn, userna
 @click.option("--mattermost-url", type=str, default=None, help="Mattermost server URL (overrides config)")
 @click.option("--seed", type=int, default=None, help="Random seed for reproducible output")
 @click.option("-y", "--yes", "auto_yes", is_flag=True, default=False, help="Auto-confirm prompts (e.g. config changes)")
-def content_cmd(config_file, pat, mattermost_url, seed, auto_yes) -> None:
+@click.option("--skip-verify-ssl", is_flag=True, default=False, help="Skip TLS certificate verification (for self-signed certs)")
+def content_cmd(config_file, pat, mattermost_url, seed, auto_yes, skip_verify_ssl) -> None:
     """Generate Mattermost content (teams, channels, posts, threads, reactions, DMs).
 
     Requires a running Mattermost server with LDAP users already logged in.
@@ -390,7 +412,7 @@ def content_cmd(config_file, pat, mattermost_url, seed, auto_yes) -> None:
         raise click.ClickException("No content to generate. Define teams or DMs in your config.")
 
     click.echo(f"Connecting to Mattermost at {cfg.mattermost.url}...")
-    client = MattermostClient(cfg.mattermost.url, cfg.mattermost.pat)
+    client = MattermostClient(cfg.mattermost.url, cfg.mattermost.pat, verify_ssl=not skip_verify_ssl)
     _validate_pat(client)
 
     # Build user map by fetching all users from Mattermost
@@ -427,9 +449,10 @@ def content_cmd(config_file, pat, mattermost_url, seed, auto_yes) -> None:
 @click.option("--mattermost-url", type=str, default=None, help="Mattermost server URL (overrides config)")
 @click.option("--pat", type=str, default=None, help="Mattermost Personal Access Token (overrides config/env)")
 @click.option("-y", "--yes", "auto_yes", is_flag=True, default=False, help="Auto-confirm prompts (e.g. config changes)")
+@click.option("--skip-verify-ssl", is_flag=True, default=False, help="Skip TLS certificate verification (for self-signed certs)")
 def run_all_cmd(
     host, port, bind_dn, bind_password, use_ssl,
-    mattermost_url, pat, auto_yes,
+    mattermost_url, pat, auto_yes, skip_verify_ssl,
     config_file, users, groups, members_per_group, base_dn, email_domain,
     default_password, password_scheme, seed, abac_inline, abac_profile,
 ) -> None:
@@ -482,7 +505,7 @@ def run_all_cmd(
         return
 
     click.echo("\n=== Step 3: Generate Mattermost content ===")
-    client = MattermostClient(mm_url, cfg.mattermost.pat)
+    client = MattermostClient(mm_url, cfg.mattermost.pat, verify_ssl=not skip_verify_ssl)
     _validate_pat(client)
 
     if cfg.content.teams:
