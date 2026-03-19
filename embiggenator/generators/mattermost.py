@@ -76,6 +76,54 @@ def generate_channel_configs(
     return channels
 
 
+def preflight_check_max_users_per_team(
+    client: MattermostClient,
+    user_count: int,
+    *,
+    auto_yes: bool = False,
+) -> None:
+    """Check that MaxUsersPerTeam is large enough for the user count.
+
+    If the limit is too low, prompt the user (or auto-patch with auto_yes)
+    to increase it. On 403 (non-admin PAT), warn and continue best-effort.
+    """
+    try:
+        config = client.get_config()
+    except MattermostAPIError as e:
+        if e.status == 403:
+            click.echo(
+                "Warning: unable to read server config (403 Forbidden). "
+                "MaxUsersPerTeam check skipped — your PAT may not have admin permissions."
+            )
+            return
+        raise
+
+    max_users = config.get("TeamSettings", {}).get("MaxUsersPerTeam", 0)
+
+    if user_count <= max_users:
+        click.echo(f"  MaxUsersPerTeam ({max_users}) is sufficient for {user_count} users.")
+        return
+
+    click.echo(
+        f"  MaxUsersPerTeam is currently {max_users} but you have {user_count} users."
+    )
+
+    if not auto_yes:
+        click.confirm(f"  Increase MaxUsersPerTeam to {user_count}?", default=True, abort=True)
+
+    try:
+        client.patch_config({"TeamSettings": {"MaxUsersPerTeam": user_count}})
+    except MattermostAPIError as e:
+        if e.status == 403:
+            raise click.ClickException(
+                "Unable to update MaxUsersPerTeam (403 Forbidden). "
+                "Your PAT needs system admin permissions to change server config."
+            )
+        raise
+
+    click.echo(f"  MaxUsersPerTeam updated to {user_count}.")
+
+
 def generate_mattermost_content(
     client: MattermostClient,
     content_config: ContentConfig,

@@ -56,6 +56,25 @@ def _add_common_options(func):
     return func
 
 
+# Shared LDAP connection options (used by populate, reset, disable-user, update-user, run-all)
+# Note: --base-dn is NOT included here because _common_options already defines it for
+# populate/run-all. Commands that don't use _common_options add --base-dn explicitly.
+_ldap_connection_options = [
+    click.option("--host", type=str, default="localhost", show_default=True, help="LDAP server host"),
+    click.option("--port", type=int, default=10389, show_default=True, help="LDAP server port"),
+    click.option("--bind-dn", type=str, default=None, help="Bind DN (default: cn=admin,dc=planetexpress,dc=com)"),
+    click.option("--bind-password", type=str, default=None, help="Bind password (default: GoodNewsEveryone)"),
+    click.option("--use-ssl", is_flag=True, default=False, help="Use SSL/TLS connection"),
+]
+
+
+def _add_ldap_options(func):
+    """Apply shared LDAP connection options to a command."""
+    for option in reversed(_ldap_connection_options):
+        func = option(func)
+    return func
+
+
 def _build_config_and_generate(
     *,
     config_file, users, groups, members_per_group, base_dn, email_domain,
@@ -120,11 +139,7 @@ def generate_ldif_cmd(
 
 @cli.command("populate")
 @_add_common_options
-@click.option("--host", type=str, default="localhost", show_default=True, help="LDAP server host")
-@click.option("--port", type=int, default=10389, show_default=True, help="LDAP server port")
-@click.option("--bind-dn", type=str, default=None, help="Bind DN (default: cn=admin,dc=planetexpress,dc=com)")
-@click.option("--bind-password", type=str, default=None, help="Bind password (default: GoodNewsEveryone)")
-@click.option("--use-ssl", is_flag=True, default=False, help="Use SSL/TLS connection")
+@_add_ldap_options
 @click.option("--mattermost-url", type=str, default=None, help="Mattermost server URL to log users in and activate accounts")
 @click.option("--nologin", is_flag=True, default=False, help="Skip Mattermost login (only populate LDAP)")
 def populate_cmd(
@@ -159,16 +174,19 @@ def populate_cmd(
 
 
 @cli.command("reset")
-@click.option("--host", type=str, default="localhost", show_default=True, help="LDAP server host")
-@click.option("--port", type=int, default=10389, show_default=True, help="LDAP server port")
-@click.option("--bind-dn", type=str, default=None, help="Bind DN (default: cn=admin,dc=planetexpress,dc=com)")
-@click.option("--bind-password", type=str, default=None, help="Bind password (default: GoodNewsEveryone)")
-@click.option("--use-ssl", is_flag=True, default=False, help="Use SSL/TLS connection")
+@_add_ldap_options
 @click.option("--base-dn", type=str, default="dc=planetexpress,dc=com", show_default=True, help="Base DN")
 @click.option("--no-restore", is_flag=True, default=False, help="Don't restore built-in default entries after clearing")
+@click.option("--mattermost-url", type=str, default=None, help="Mattermost URL — also delete all non-admin users from Mattermost")
+@click.option("--pat", type=str, default=None, help="Mattermost Personal Access Token (required with --mattermost-url)")
 @click.confirmation_option(prompt="This will delete ALL entries under ou=people. Continue?")
-def reset_cmd(host, port, bind_dn, bind_password, use_ssl, base_dn, no_restore) -> None:
-    """Delete all entries and optionally restore built-in defaults."""
+def reset_cmd(host, port, bind_dn, bind_password, use_ssl, base_dn, no_restore, mattermost_url, pat) -> None:
+    """Delete all entries and optionally restore built-in defaults.
+
+    If --mattermost-url and --pat are provided, also permanently deletes all
+    non-bot, non-admin users from Mattermost. Requires
+    ServiceSettings.EnableAPIUserDeletion=true on the server.
+    """
     from embiggenator.output.ldap_writer import reset_ldap
 
     reset_ldap(
@@ -181,13 +199,169 @@ def reset_cmd(host, port, bind_dn, bind_password, use_ssl, base_dn, no_restore) 
         restore_defaults=not no_restore,
     )
 
+    if mattermost_url and not pat:
+        raise click.ClickException("--pat is required when using --mattermost-url with reset")
+
+    if mattermost_url and pat:
+        import urllib.error
+
+        from embiggenator.output.mattermost_client import MattermostAPIError, MattermostClient
+
+        click.echo(f"\nDeleting Mattermost users at {mattermost_url}...")
+        client = MattermostClient(mattermost_url, pat)
+        _validate_pat(client)
+
+        # Preflight: check that API user/team deletion is enabled
+        try:
+            config = client.get_config()
+            service_settings = config.get("ServiceSettings", {})
+            api_user_deletion = service_settings.get("EnableAPIUserDeletion", False)
+            api_team_deletion = service_settings.get("EnableAPITeamDeletion", False)
+            missing = []
+            if not api_user_deletion:
+                missing.append("EnableAPIUserDeletion")
+            if not api_team_deletion:
+                missing.append("EnableAPITeamDeletion")
+            if missing:
+                raise click.ClickException(
+                    f"ServiceSettings.{' and '.join(missing)} must be enabled on the Mattermost server. "
+                    "Enable in the System Console or config.json before using --mattermost-url with reset."
+                )
+        except MattermostAPIError as e:
+            if e.status == 403:
+                click.echo("  Warning: cannot read server config (403 Forbidden). "
+                           "Ensure ServiceSettings.EnableAPIUserDeletion=true and "
+                           "EnableAPITeamDeletion=true or deletion will fail.")
+            else:
+                raise
+        except urllib.error.URLError as e:
+            raise click.ClickException(f"Cannot reach Mattermost at {mattermost_url}: {e.reason}") from None
+
+        try:
+            all_users = client.get_all_users()
+        except urllib.error.URLError as e:
+            raise click.ClickException(f"Cannot reach Mattermost at {mattermost_url}: {e.reason}") from None
+
+        deleted = 0
+        skipped = 0
+        errors = 0
+        for user in all_users:
+            if user.get("is_bot"):
+                skipped += 1
+                continue
+            roles = user.get("roles", "")
+            if "system_admin" in roles:
+                skipped += 1
+                continue
+            try:
+                client.delete_user(user["id"], permanent=True)
+                deleted += 1
+            except MattermostAPIError as e:
+                errors += 1
+                if errors <= 3:
+                    click.echo(f"  Warning: failed to delete user '{user.get('username', user['id'])}': {e}")
+                elif errors == 4:
+                    click.echo("  (suppressing further deletion errors)")
+
+        click.echo(f"Mattermost: {deleted} users deleted, {skipped} skipped (bots/admins), {errors} errors")
+
+        # Delete all teams (cascades to channels)
+        click.echo("Deleting Mattermost teams...")
+        all_teams = client.get_all_teams()
+        teams_deleted = 0
+        teams_errors = 0
+        for team in all_teams:
+            try:
+                client.delete_team(team["id"], permanent=True)
+                teams_deleted += 1
+            except MattermostAPIError as e:
+                teams_errors += 1
+                if teams_errors <= 3:
+                    click.echo(f"  Warning: failed to delete team '{team.get('display_name', team['id'])}': {e}")
+                elif teams_errors == 4:
+                    click.echo("  (suppressing further team deletion errors)")
+
+        click.echo(f"Mattermost: {teams_deleted} teams deleted, {teams_errors} errors")
+
+        # Create a default team so the server isn't left in a broken state
+        try:
+            team_id = client.get_or_create_team("default", "Default")
+            me = client.get_me()
+            client.add_user_to_team(team_id, me["id"])
+            click.echo("Created default team 'Default' with Town Square and Off-Topic channels")
+        except MattermostAPIError as e:
+            click.echo(f"  Warning: failed to create default team: {e}")
+
+
+@cli.command("disable-user")
+@_add_ldap_options
+@click.option("--base-dn", type=str, default="dc=planetexpress,dc=com", show_default=True, help="Base DN")
+@click.argument("usernames", nargs=-1, required=True)
+def disable_user_cmd(host, port, bind_dn, bind_password, use_ssl, base_dn, usernames) -> None:
+    """Disable one or more LDAP users by setting description=DISABLED.
+
+    Configure Mattermost with LdapSettings.UserFilter=(!(description=DISABLED))
+    to exclude disabled users during sync.
+    """
+    from embiggenator.output.ldap_writer import disable_ldap_user
+
+    for username in usernames:
+        disable_ldap_user(
+            username,
+            base_dn=base_dn,
+            host=host,
+            port=port,
+            bind_dn=bind_dn or f"cn=admin,{base_dn}",
+            bind_password=bind_password or "GoodNewsEveryone",
+            use_ssl=use_ssl,
+        )
+
+
+@cli.command("update-user")
+@_add_ldap_options
+@click.option("--base-dn", type=str, default="dc=planetexpress,dc=com", show_default=True, help="Base DN")
+@click.argument("username")
+@click.option("--set", "attrs", multiple=True, required=True, help="Attribute to set (ATTR=VALUE)")
+def update_user_cmd(host, port, bind_dn, bind_password, use_ssl, base_dn, username, attrs) -> None:
+    """Modify LDAP attributes for a user.
+
+    Use --set ATTR=VALUE to change attributes. If cn is changed, the entry DN
+    is renamed. Multiple --set flags can be provided.
+
+    Examples:
+
+        embiggenator update-user jdoe --set sn=NewLastName
+
+        embiggenator update-user jdoe --set mail=new@example.com --set sn=Smith
+    """
+    from embiggenator.output.ldap_writer import update_ldap_user
+
+    changes: dict[str, str] = {}
+    for attr_spec in attrs:
+        name, sep, value = attr_spec.partition("=")
+        if not sep or not name:
+            raise click.ClickException(f"Invalid --set format: '{attr_spec}' (expected ATTR=VALUE)")
+        changes[name] = value
+
+    update_ldap_user(
+        username,
+        changes,
+        base_dn=base_dn,
+        host=host,
+        port=port,
+        bind_dn=bind_dn or f"cn=admin,{base_dn}",
+        bind_password=bind_password or "GoodNewsEveryone",
+        use_ssl=use_ssl,
+    )
+
 
 @cli.command("content")
 @click.option("-c", "--config", "config_file", type=click.Path(exists=True), default=None, help="YAML config file")
 @click.option("--pat", type=str, default=None, help="Mattermost Personal Access Token (overrides config/env)")
 @click.option("--mattermost-url", type=str, default=None, help="Mattermost server URL (overrides config)")
 @click.option("--seed", type=int, default=None, help="Random seed for reproducible output")
-def content_cmd(config_file, pat, mattermost_url, seed) -> None:
+@click.option("-y", "--yes", "auto_yes", is_flag=True, default=False, help="Auto-confirm prompts (e.g. config changes)")
+def content_cmd(config_file, pat, mattermost_url, seed, auto_yes) -> None:
     """Generate Mattermost content (teams, channels, posts, threads, reactions, DMs).
 
     Requires a running Mattermost server with LDAP users already logged in.
@@ -198,7 +372,7 @@ def content_cmd(config_file, pat, mattermost_url, seed) -> None:
     use 'run-all' which captures individual session tokens during login.
     """
     from embiggenator.generators.content import PassageBank
-    from embiggenator.generators.mattermost import generate_mattermost_content
+    from embiggenator.generators.mattermost import generate_mattermost_content, preflight_check_max_users_per_team
     from embiggenator.output.mattermost_client import MattermostClient
 
     cfg = build_config(config_file=config_file, pat=pat, seed=seed)
@@ -217,6 +391,7 @@ def content_cmd(config_file, pat, mattermost_url, seed) -> None:
 
     click.echo(f"Connecting to Mattermost at {cfg.mattermost.url}...")
     client = MattermostClient(cfg.mattermost.url, cfg.mattermost.pat)
+    _validate_pat(client)
 
     # Build user map by fetching all users from Mattermost
     click.echo("Fetching users from Mattermost...")
@@ -227,6 +402,9 @@ def content_cmd(config_file, pat, mattermost_url, seed) -> None:
         raise click.ClickException(
             "No users found on Mattermost. Run 'populate' with --mattermost-url first."
         )
+
+    if cfg.content.teams:
+        preflight_check_max_users_per_team(client, len(user_map), auto_yes=auto_yes)
 
     click.echo("Generating content...")
     bank = PassageBank()
@@ -245,16 +423,13 @@ def content_cmd(config_file, pat, mattermost_url, seed) -> None:
 
 @cli.command("run-all")
 @_add_common_options
-@click.option("--host", type=str, default="localhost", show_default=True, help="LDAP server host")
-@click.option("--port", type=int, default=10389, show_default=True, help="LDAP server port")
-@click.option("--bind-dn", type=str, default=None, help="Bind DN (default: cn=admin,dc=planetexpress,dc=com)")
-@click.option("--bind-password", type=str, default=None, help="Bind password (default: GoodNewsEveryone)")
-@click.option("--use-ssl", is_flag=True, default=False, help="Use SSL/TLS connection")
+@_add_ldap_options
 @click.option("--mattermost-url", type=str, default=None, help="Mattermost server URL (overrides config)")
 @click.option("--pat", type=str, default=None, help="Mattermost Personal Access Token (overrides config/env)")
+@click.option("-y", "--yes", "auto_yes", is_flag=True, default=False, help="Auto-confirm prompts (e.g. config changes)")
 def run_all_cmd(
     host, port, bind_dn, bind_password, use_ssl,
-    mattermost_url, pat,
+    mattermost_url, pat, auto_yes,
     config_file, users, groups, members_per_group, base_dn, email_domain,
     default_password, password_scheme, seed, abac_inline, abac_profile,
 ) -> None:
@@ -263,7 +438,7 @@ def run_all_cmd(
     This is the all-in-one command for setting up a complete test environment.
     """
     from embiggenator.generators.content import PassageBank
-    from embiggenator.generators.mattermost import generate_mattermost_content
+    from embiggenator.generators.mattermost import generate_mattermost_content, preflight_check_max_users_per_team
     from embiggenator.output.ldap_writer import login_mattermost_users, populate_ldap
     from embiggenator.output.mattermost_client import MattermostClient
 
@@ -308,6 +483,11 @@ def run_all_cmd(
 
     click.echo("\n=== Step 3: Generate Mattermost content ===")
     client = MattermostClient(mm_url, cfg.mattermost.pat)
+    _validate_pat(client)
+
+    if cfg.content.teams:
+        preflight_check_max_users_per_team(client, len(user_map), auto_yes=auto_yes)
+
     bank = PassageBank()
     result = generate_mattermost_content(
         client, cfg.content, user_map, seed=cfg.seed, passage_bank=bank,
@@ -320,6 +500,26 @@ def run_all_cmd(
     click.echo(f"  Replies: {result.replies_created}")
     click.echo(f"  Reactions: {result.reactions_added}")
     click.echo(f"  DM conversations: {result.dm_conversations} ({result.dm_messages} messages)")
+
+
+def _validate_pat(client: MattermostClient) -> None:
+    """Verify the PAT is valid by calling /users/me. Raises ClickException on 401."""
+    import urllib.error
+
+    from embiggenator.output.mattermost_client import MattermostAPIError
+
+    try:
+        client.get_me()
+    except MattermostAPIError as e:
+        if e.status == 401:
+            raise click.ClickException(
+                "Invalid or expired PAT. Check your token and try again."
+            ) from None
+        raise
+    except urllib.error.URLError as e:
+        raise click.ClickException(
+            f"Cannot reach Mattermost at {client.base_url}: {e.reason}"
+        ) from None
 
 
 def _build_user_map_from_pat(

@@ -207,7 +207,69 @@ embiggenator reset --host localhost --port 10389 --no-restore --yes
 | `--use-ssl` | Use SSL/TLS connection | false |
 | `--base-dn` | Base DN | `dc=planetexpress,dc=com` |
 | `--no-restore` | Don't restore built-in defaults after clearing | false |
+| `--mattermost-url` | Mattermost URL — also delete all non-admin users from Mattermost | -- |
+| `--pat` | Mattermost Personal Access Token (required with `--mattermost-url`) | -- |
 | `--yes` | Skip confirmation prompt | false |
+
+To also wipe Mattermost users during reset:
+
+```bash
+embiggenator reset --host localhost --port 10389 \
+  --mattermost-url http://localhost:8065 --pat "$MM_PAT" --yes
+```
+
+This permanently deletes all non-bot, non-admin users and all teams from Mattermost after clearing LDAP. A "Default" team is auto-created after cleanup so the server remains usable (Mattermost creates Town Square and Off-Topic channels automatically). Requires `ServiceSettings.EnableAPIUserDeletion=true` and `EnableAPITeamDeletion=true` on the Mattermost server.
+
+### `disable-user`
+
+Marks one or more LDAP users as disabled by setting `description=DISABLED`. Mattermost will deactivate them on next LDAP sync if the user filter excludes disabled users.
+
+```bash
+# Disable a single user
+embiggenator disable-user jdoe
+
+# Disable multiple users
+embiggenator disable-user jdoe asmith bwilson
+```
+
+| Option | Description | Default |
+|---|---|---|
+| `--host` | LDAP server host | `localhost` |
+| `--port` | LDAP server port | `10389` |
+| `--bind-dn` | Bind DN for authentication | `cn=admin,dc=planetexpress,dc=com` |
+| `--bind-password` | Bind password | `GoodNewsEveryone` |
+| `--use-ssl` | Use SSL/TLS connection | false |
+| `--base-dn` | Base DN | `dc=planetexpress,dc=com` |
+
+> **Mattermost note:** Set `LdapSettings.UserFilter` to `(!(description=DISABLED))` so that disabled users are excluded during LDAP sync.
+
+### `update-user`
+
+Modifies LDAP attributes for an existing user. Useful for testing how Mattermost handles attribute changes during sync (e.g. name changes, email updates, ABAC attribute changes).
+
+```bash
+# Change a user's last name
+embiggenator update-user jdoe --set sn=NewLastName
+
+# Update multiple attributes at once
+embiggenator update-user jdoe --set sn=Smith --set mail=jsmith@example.com
+
+# Change an ABAC attribute
+embiggenator update-user jdoe --set businessCategory=Secret
+
+# Rename a user (changes the DN)
+embiggenator update-user jdoe --set cn="Jane Doe"
+```
+
+| Option | Description | Default |
+|---|---|---|
+| `--set` | Attribute to set (`ATTR=VALUE`, repeatable) | (required) |
+| `--host` | LDAP server host | `localhost` |
+| `--port` | LDAP server port | `10389` |
+| `--bind-dn` | Bind DN for authentication | `cn=admin,dc=planetexpress,dc=com` |
+| `--bind-password` | Bind password | `GoodNewsEveryone` |
+| `--use-ssl` | Use SSL/TLS connection | false |
+| `--base-dn` | Base DN | `dc=planetexpress,dc=com` |
 
 ### `show-config`
 
@@ -433,6 +495,17 @@ python -m embiggenator generate-ldif -u 50 -o ./data
 pip install pytest
 pytest
 ```
+
+## FAQ
+
+### "Warning: per-team channel overrides (X) exceed total channels target (Y). Override totals will be kept."
+
+Your config has a top-level `channels` target (distributed across all teams) **and** individual teams with `channels_per_team` overrides. The per-team overrides already add up to more than the total target, so the total is effectively ignored.
+
+To fix it, either:
+- Increase `channels` to at least match the sum of your per-team overrides
+- Remove the top-level `channels` setting and let per-team values control everything
+- Lower the per-team overrides
 
 ## Acknowledgments
 

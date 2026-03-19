@@ -83,6 +83,25 @@ class MattermostClient:
         })
         return result["id"]
 
+    def get_all_teams(self, per_page: int = 200) -> list[dict]:
+        """Fetch all teams via paginated API calls. Returns list of team dicts."""
+        all_teams: list[dict] = []
+        page = 0
+        while True:
+            batch = self._request("GET", f"/teams?page={page}&per_page={per_page}")
+            if not batch:
+                break
+            all_teams.extend(batch)
+            if len(batch) < per_page:
+                break
+            page += 1
+        return all_teams
+
+    def delete_team(self, team_id: str, permanent: bool = True) -> None:
+        """Delete a team. Permanent deletion cascades to channels."""
+        params = "?permanent=true" if permanent else ""
+        self._request("DELETE", f"/teams/{team_id}{params}")
+
     def get_team_by_name(self, name: str) -> dict | None:
         """Get a team by name. Returns team dict or None if not found."""
         try:
@@ -215,6 +234,22 @@ class MattermostClient:
             token_override=token_override,
         )
 
+    # ── Current user ──
+
+    def get_me(self) -> dict:
+        """Get the authenticated user's profile. Returns user dict."""
+        return self._request("GET", "/users/me")
+
+    # ── Config ──
+
+    def get_config(self) -> dict:
+        """Get the full server configuration. Requires system admin permissions."""
+        return self._request("GET", "/config")
+
+    def patch_config(self, config_patch: dict) -> dict:
+        """Partially update the server configuration. Requires system admin permissions."""
+        return self._request("PUT", "/config/patch", config_patch)
+
     # ── Users ──
 
     def get_user_by_username(self, username: str) -> dict | None:
@@ -232,6 +267,11 @@ class MattermostClient:
             return []
         result = self._request("POST", "/users/usernames", usernames)
         return result or []
+
+    def delete_user(self, user_id: str, permanent: bool = True) -> None:
+        """Delete a user. Requires ServiceSettings.EnableAPIUserDeletion=true on the server."""
+        params = "?permanent=true" if permanent else ""
+        self._request("DELETE", f"/users/{user_id}{params}")
 
     def get_all_users(self, per_page: int = 200) -> list[dict]:
         """Fetch all users via paginated API calls. Returns list of user dicts."""

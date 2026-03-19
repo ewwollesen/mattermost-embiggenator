@@ -9,10 +9,11 @@ import urllib.error
 from pathlib import Path
 
 import click
-from ldap3 import ALL, SUBTREE, Connection, Server
+from ldap3 import ALL, MODIFY_REPLACE, SUBTREE, Connection, Server
 from ldap3.core.exceptions import LDAPEntryAlreadyExistsResult, LDAPException
+from ldap3.utils.conv import escape_filter_chars
 
-from embiggenator.models import GeneratedGroup, GeneratedUser
+from embiggenator.models import GeneratedGroup, GeneratedUser, _escape_dn_value
 
 
 def populate_ldap(
@@ -248,3 +249,71 @@ def _attrs_to_dict(attr_tuples: list[tuple[str, str]]) -> dict[str, list[str]]:
             continue
         result.setdefault(name, []).append(value)
     return result
+
+
+def _find_user_by_uid(conn: Connection, people_dn: str, uid: str) -> str | None:
+    """Search LDAP for a user by uid. Returns the entry DN or None."""
+    safe_uid = escape_filter_chars(uid)
+    conn.search(people_dn, f"(uid={safe_uid})", search_scope=SUBTREE)
+    if conn.entries:
+        return conn.entries[0].entry_dn
+    return None
+
+
+def disable_ldap_user(
+    username: str,
+    base_dn: str = "dc=planetexpress,dc=com",
+    people_ou: str = "people",
+    host: str = "localhost",
+    port: int = 10389,
+    bind_dn: str = "cn=admin,dc=planetexpress,dc=com",
+    bind_password: str = "GoodNewsEveryone",
+    use_ssl: bool = False,
+) -> None:
+    """Mark a user as disabled by setting description=DISABLED."""
+    server = Server(host, port=port, use_ssl=use_ssl, get_info=ALL)
+    people_dn = f"ou={people_ou},{base_dn}"
+
+    with Connection(server, user=bind_dn, password=bind_password, auto_bind=True, raise_exceptions=True) as conn:
+        dn = _find_user_by_uid(conn, people_dn, username)
+        if dn is None:
+            raise click.ClickException(f"User '{username}' not found in LDAP under {people_dn}")
+
+        conn.modify(dn, {"description": [(MODIFY_REPLACE, ["DISABLED"])]})
+        click.echo(f"Disabled user '{username}' (set description=DISABLED on {dn})")
+
+
+def update_ldap_user(
+    username: str,
+    changes: dict[str, str],
+    base_dn: str = "dc=planetexpress,dc=com",
+    people_ou: str = "people",
+    host: str = "localhost",
+    port: int = 10389,
+    bind_dn: str = "cn=admin,dc=planetexpress,dc=com",
+    bind_password: str = "GoodNewsEveryone",
+    use_ssl: bool = False,
+) -> None:
+    """Modify LDAP attributes for a user. If 'cn' is changed, the DN is renamed."""
+    server = Server(host, port=port, use_ssl=use_ssl, get_info=ALL)
+    people_dn = f"ou={people_ou},{base_dn}"
+
+    with Connection(server, user=bind_dn, password=bind_password, auto_bind=True, raise_exceptions=True) as conn:
+        dn = _find_user_by_uid(conn, people_dn, username)
+        if dn is None:
+            raise click.ClickException(f"User '{username}' not found in LDAP under {people_dn}")
+
+        # Separate cn from other attributes — cn requires a DN rename
+        new_cn = changes.pop("cn", None)
+        non_cn_changes = {attr: [(MODIFY_REPLACE, [val])] for attr, val in changes.items()}
+
+        # Apply non-cn attribute changes first (on the current DN)
+        if non_cn_changes:
+            conn.modify(dn, non_cn_changes)
+            click.echo(f"Updated attributes on '{username}': {', '.join(changes)}")
+
+        # Rename DN if cn changed
+        if new_cn is not None:
+            escaped_cn = _escape_dn_value(new_cn)
+            conn.modify_dn(dn, f"cn={escaped_cn}")
+            click.echo(f"Renamed DN for '{username}': cn={new_cn}")

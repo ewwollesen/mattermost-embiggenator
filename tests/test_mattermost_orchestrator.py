@@ -5,6 +5,7 @@ from __future__ import annotations
 import random
 from unittest.mock import MagicMock, patch
 
+import click
 import pytest
 
 from embiggenator.config import ChannelConfig, ContentConfig, TeamConfig
@@ -13,8 +14,9 @@ from embiggenator.generators.mattermost import (
     _compute_channel_targets,
     generate_channel_configs,
     generate_mattermost_content,
+    preflight_check_max_users_per_team,
 )
-from embiggenator.output.mattermost_client import MattermostClient
+from embiggenator.output.mattermost_client import MattermostClient, MattermostAPIError
 
 
 @pytest.fixture()
@@ -394,3 +396,55 @@ class TestComputeChannelTargets:
             mock_client, config, user_map, seed=42, passage_bank=passage_bank,
         )
         assert result.channels_created == 20
+
+
+class TestPreflightMaxUsersPerTeam:
+    @pytest.fixture()
+    def mock_client(self):
+        client = MagicMock(spec=MattermostClient)
+        return client
+
+    def test_limit_sufficient(self, mock_client):
+        mock_client.get_config.return_value = {"TeamSettings": {"MaxUsersPerTeam": 100}}
+        preflight_check_max_users_per_team(mock_client, 50)
+        mock_client.patch_config.assert_not_called()
+
+    def test_limit_exceeded_confirm(self, mock_client):
+        mock_client.get_config.return_value = {"TeamSettings": {"MaxUsersPerTeam": 10}}
+        mock_client.patch_config.return_value = {"TeamSettings": {"MaxUsersPerTeam": 50}}
+        with patch("embiggenator.generators.mattermost.click.confirm"):
+            preflight_check_max_users_per_team(mock_client, 50)
+        mock_client.patch_config.assert_called_once_with({"TeamSettings": {"MaxUsersPerTeam": 50}})
+
+    def test_auto_yes_patches_without_prompting(self, mock_client):
+        mock_client.get_config.return_value = {"TeamSettings": {"MaxUsersPerTeam": 10}}
+        mock_client.patch_config.return_value = {"TeamSettings": {"MaxUsersPerTeam": 50}}
+        with patch("embiggenator.generators.mattermost.click.confirm") as mock_confirm:
+            preflight_check_max_users_per_team(mock_client, 50, auto_yes=True)
+        mock_confirm.assert_not_called()
+        mock_client.patch_config.assert_called_once_with({"TeamSettings": {"MaxUsersPerTeam": 50}})
+
+    def test_get_config_403_warns_and_continues(self, mock_client):
+        mock_client.get_config.side_effect = MattermostAPIError(403, "forbidden", "/config")
+        # Should not raise
+        preflight_check_max_users_per_team(mock_client, 50)
+        mock_client.patch_config.assert_not_called()
+
+    def test_get_config_500_reraises(self, mock_client):
+        mock_client.get_config.side_effect = MattermostAPIError(500, "server error", "/config")
+        with pytest.raises(MattermostAPIError) as exc_info:
+            preflight_check_max_users_per_team(mock_client, 50)
+        assert exc_info.value.status == 500
+
+    def test_user_declines_aborts(self, mock_client):
+        mock_client.get_config.return_value = {"TeamSettings": {"MaxUsersPerTeam": 10}}
+        with patch("embiggenator.generators.mattermost.click.confirm", side_effect=click.Abort):
+            with pytest.raises(click.Abort):
+                preflight_check_max_users_per_team(mock_client, 50)
+        mock_client.patch_config.assert_not_called()
+
+    def test_patch_config_403_raises_click_exception(self, mock_client):
+        mock_client.get_config.return_value = {"TeamSettings": {"MaxUsersPerTeam": 10}}
+        mock_client.patch_config.side_effect = MattermostAPIError(403, "forbidden", "/config/patch")
+        with pytest.raises(click.ClickException, match="Unable to update MaxUsersPerTeam"):
+            preflight_check_max_users_per_team(mock_client, 50, auto_yes=True)

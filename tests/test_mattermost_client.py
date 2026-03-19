@@ -244,6 +244,32 @@ class TestErrorHandling:
         assert mc.MAX_RETRY_WAIT == 30.0
 
 
+class TestDeleteUser:
+    def test_deletes_user_permanently(self, client):
+        mc, handler = client
+        handler.responses[("DELETE", "/api/v4/users/")] = (200, {"status": "OK"})
+        mc.delete_user("user123", permanent=True)
+        assert len(handler.requests) == 1
+        method, path, _ = handler.requests[0]
+        assert method == "DELETE"
+        assert "/users/user123" in path
+        assert "permanent=true" in path
+
+    def test_deletes_user_non_permanently(self, client):
+        mc, handler = client
+        handler.responses[("DELETE", "/api/v4/users/")] = (200, {"status": "OK"})
+        mc.delete_user("user123", permanent=False)
+        method, path, _ = handler.requests[0]
+        assert method == "DELETE"
+        assert "permanent" not in path
+
+    def test_delete_user_api_error(self, client):
+        mc, handler = client
+        # Default 404 response
+        with pytest.raises(MattermostAPIError):
+            mc.delete_user("nonexistent")
+
+
 class TestGetUsersByUsernames:
     def test_batch_lookup(self, client):
         mc, handler = client
@@ -274,6 +300,40 @@ class TestGetAllUsers:
         handler.responses[("GET", "/api/v4/users")] = (200, [])
         result = mc.get_all_users()
         assert result == []
+
+
+class TestConfig:
+    def test_get_config(self, client):
+        mc, handler = client
+        config_data = {"TeamSettings": {"MaxUsersPerTeam": 50}}
+        handler.responses[("GET", "/api/v4/config")] = (200, config_data)
+        result = mc.get_config()
+        assert result["TeamSettings"]["MaxUsersPerTeam"] == 50
+
+    def test_get_config_forbidden(self, client):
+        mc, handler = client
+        handler.responses[("GET", "/api/v4/config")] = (403, {"message": "forbidden"})
+        with pytest.raises(MattermostAPIError) as exc_info:
+            mc.get_config()
+        assert exc_info.value.status == 403
+
+    def test_patch_config(self, client):
+        mc, handler = client
+        updated = {"TeamSettings": {"MaxUsersPerTeam": 100}}
+        handler.responses[("PUT", "/api/v4/config/patch")] = (200, updated)
+        result = mc.patch_config({"TeamSettings": {"MaxUsersPerTeam": 100}})
+        assert result["TeamSettings"]["MaxUsersPerTeam"] == 100
+        _, _, body = handler.requests[0]
+        assert body["TeamSettings"]["MaxUsersPerTeam"] == 100
+
+
+class TestGetMe:
+    def test_returns_user(self, client):
+        mc, handler = client
+        handler.responses[("GET", "/api/v4/users/me")] = (200, {"id": "admin1", "username": "admin"})
+        me = mc.get_me()
+        assert me["id"] == "admin1"
+        assert me["username"] == "admin"
 
 
 class TestGetOrCreateRaceCondition:
