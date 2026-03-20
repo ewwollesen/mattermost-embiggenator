@@ -55,4 +55,4 @@ Embiggenator is designed for local development and testing. Do not use it agains
 ## Acknowledgments
 
 - [Robin Roemhild](https://github.com/rroemhild) for the [`docker-test-openldap`](https://github.com/rroemhild/docker-test-openldap) image that Embiggenator is built around
-- Jane Austen and Emily Brontë, for the post content
+- Jane Austen, Emily Brontë, and Mary Shelley, for the post and attachment content
