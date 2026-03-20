@@ -14,7 +14,7 @@ Built for the [`rroemhild/docker-test-openldap`](https://github.com/rroemhild/do
 2. **Clone and install:**
 
    ```bash
-   git clone <repo-url> && cd embiggenator
+   git clone https://github.com/ewwollesen/mattermost-embiggenator.git && cd mattermost-embiggenator
    python -m venv .venv && source .venv/bin/activate
    pip install .
    ```
@@ -29,8 +29,8 @@ Built for the [`rroemhild/docker-test-openldap`](https://github.com/rroemhild/do
 
    ```bash
    embiggenator run-all -c embiggenator.yaml \
-     --host localhost --port 10389 \
-     --mattermost-url http://localhost:8065 \
+     --host <ldap-host> --port <ldap-port> \
+     --mattermost-url http://<mattermost-host>:8065 \
      --pat "$MM_PAT"
    ```
 
@@ -50,4 +50,4 @@ Built for the [`rroemhild/docker-test-openldap`](https://github.com/rroemhild/do
 ## Acknowledgments
 
 - [Robin Roemhild](https://github.com/rroemhild) for the [`docker-test-openldap`](https://github.com/rroemhild/docker-test-openldap) image that Embiggenator is built around
-- Jane Austen and Emily Bront\u00eb, for the post content
+- Jane Austen and Emily Brontë, for the post content
