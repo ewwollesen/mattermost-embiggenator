@@ -2,6 +2,16 @@
 
 Task-oriented guide for common Embiggenator workflows. For the full option reference, see [commands.md](commands.md).
 
+## Contents
+
+- [I want to set up a full test environment](#i-want-to-set-up-a-full-test-environment)
+- [I only need LDAP users (no Mattermost)](#i-only-need-ldap-users-no-mattermost)
+- [I want to generate Mattermost content for existing users](#i-want-to-generate-mattermost-content-for-existing-users)
+- [I need to start over / reset everything](#i-need-to-start-over--reset-everything)
+- [I need to modify existing users](#i-need-to-modify-existing-users)
+- [Recommended Mattermost LDAP Settings](#recommended-mattermost-ldap-settings)
+- [Reproducible Output](#reproducible-output)
+
 ## I want to set up a full test environment
 
 Use `run-all` to populate LDAP, log users into Mattermost, and generate content in one shot:

@@ -1,5 +1,13 @@
 # FAQ & Troubleshooting
 
+## Contents
+
+- [Channel Override Warning](#channel-override-warning)
+- [objectClass Notes](#objectclass-notes)
+- [Verification](#verification)
+- [Running as a Python Module](#running-as-a-python-module)
+- [Running Tests](#running-tests)
+
 ## Channel Override Warning
 
 > "Warning: per-team channel overrides (X) exceed total channels target (Y). Override totals will be kept."

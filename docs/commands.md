@@ -2,6 +2,17 @@
 
 Flat reference for all Embiggenator commands. For task-oriented walkthroughs, see [getting-started.md](getting-started.md).
 
+## Contents
+
+- [`generate-ldif`](#generate-ldif)
+- [`populate`](#populate)
+- [`content`](#content)
+- [`run-all`](#run-all)
+- [`reset`](#reset)
+- [`disable-user`](#disable-user)
+- [`update-user`](#update-user)
+- [`show-config`](#show-config)
+
 ## `generate-ldif`
 
 Generates LDIF files to a directory for mounting into the OpenLDAP container.

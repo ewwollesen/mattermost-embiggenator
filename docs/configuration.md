@@ -2,6 +2,13 @@
 
 Options are resolved in priority order: **defaults < YAML config file < CLI flags**.
 
+## Contents
+
+- [YAML Config File](#yaml-config-file)
+- [Environment Variable Expansion](#environment-variable-expansion)
+- [Channel Distribution](#channel-distribution)
+- [Password Options](#password-options)
+
 ## YAML Config File
 
 ```yaml
