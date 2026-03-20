@@ -229,6 +229,8 @@ def generate_mattermost_content(
     # ── Step 2: Generate posts ──
     all_post_ids: list[tuple[str, str, str]] = []  # (post_id, channel_id, author_uid)
 
+    attach_prob = content_config.attachment_probability
+
     for ch_info in channel_plans:
         n_posts = rng.randint(
             content_config.posts_per_channel_min,
@@ -239,9 +241,26 @@ def generate_mattermost_content(
             _, token = user_map[author_uid]
             message = bank.get_passage(rng)
 
+            # Maybe attach a file
+            file_ids: list[str] | None = None
+            if attach_prob > 0 and rng.random() < attach_prob:
+                target_size = rng.randint(
+                    content_config.attachment_size_min,
+                    content_config.attachment_size_max,
+                )
+                filename, file_bytes = bank.generate_attachment(rng, target_size)
+                try:
+                    file_id = client.upload_file(
+                        ch_info.channel_id, filename, file_bytes, token_override=token,
+                    )
+                    file_ids = [file_id]
+                    result.attachments_uploaded += 1
+                except MattermostAPIError as e:
+                    click.echo(f"    Warning: failed to upload attachment in {ch_info.channel_name}: {e}")
+
             try:
                 post_id = client.create_post(
-                    ch_info.channel_id, message, token_override=token,
+                    ch_info.channel_id, message, file_ids=file_ids, token_override=token,
                 )
                 result.posts_created += 1
                 all_post_ids.append((post_id, ch_info.channel_id, author_uid))
@@ -249,6 +268,8 @@ def generate_mattermost_content(
                 click.echo(f"    Warning: failed to create post in {ch_info.channel_name}: {e}")
 
     click.echo(f"  Posts created: {result.posts_created}")
+    if result.attachments_uploaded:
+        click.echo(f"  Attachments uploaded: {result.attachments_uploaded}")
 
     # ── Step 3: Generate threaded replies ──
     for post_id, channel_id, original_uid in all_post_ids:

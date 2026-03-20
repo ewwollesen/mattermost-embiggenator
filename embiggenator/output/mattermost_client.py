@@ -201,20 +201,25 @@ class MattermostClient:
         message: str,
         root_id: str = "",
         *,
+        file_ids: list[str] | None = None,
         token_override: str | None = None,
     ) -> str:
         """Create a post. If root_id is set, creates a threaded reply. Returns post_id.
 
         Use token_override to post as a specific user (using their session token).
+        If file_ids is provided, attach the uploaded files to the post.
         """
+        body: dict[str, Any] = {
+            "channel_id": channel_id,
+            "message": message,
+            "root_id": root_id,
+        }
+        if file_ids:
+            body["file_ids"] = file_ids
         result = self._request(
             "POST",
             "/posts",
-            {
-                "channel_id": channel_id,
-                "message": message,
-                "root_id": root_id,
-            },
+            body,
             token_override=token_override,
         )
         return result["id"]
@@ -282,6 +287,68 @@ class MattermostClient:
         """Delete a user. Requires ServiceSettings.EnableAPIUserDeletion=true on the server."""
         params = "?permanent=true" if permanent else ""
         self._request("DELETE", f"/users/{user_id}{params}")
+
+    def upload_file(
+        self,
+        channel_id: str,
+        filename: str,
+        file_bytes: bytes,
+        *,
+        token_override: str | None = None,
+    ) -> str:
+        """Upload a file to a channel. Returns file_id.
+
+        Uses multipart/form-data encoding (required by Mattermost /files endpoint).
+        """
+        import uuid
+
+        url = f"{self.base_url}/api/v4/files"
+        token = token_override or self.token
+        boundary = uuid.uuid4().hex
+
+        # Build multipart body
+        parts: list[bytes] = []
+        # channel_id field
+        parts.append(f"--{boundary}\r\n".encode())
+        parts.append(b'Content-Disposition: form-data; name="channel_id"\r\n\r\n')
+        parts.append(f"{channel_id}\r\n".encode())
+        # file field
+        parts.append(f"--{boundary}\r\n".encode())
+        parts.append(
+            f'Content-Disposition: form-data; name="files"; filename="{filename}"\r\n'.encode()
+        )
+        parts.append(b"Content-Type: application/octet-stream\r\n\r\n")
+        parts.append(file_bytes)
+        parts.append(b"\r\n")
+        parts.append(f"--{boundary}--\r\n".encode())
+
+        body = b"".join(parts)
+
+        for attempt in range(self.MAX_RETRIES + 1):
+            req = urllib.request.Request(
+                url,
+                data=body,
+                headers={
+                    "Content-Type": f"multipart/form-data; boundary={boundary}",
+                    "Authorization": f"Bearer {token}",
+                },
+                method="POST",
+            )
+            try:
+                with urllib.request.urlopen(req, context=self._ssl_context) as resp:
+                    result = json.loads(resp.read().decode("utf-8"))
+                    return result["file_infos"][0]["id"]
+            except urllib.error.HTTPError as e:
+                if e.code == 429 and attempt < self.MAX_RETRIES:
+                    retry_after = float(
+                        e.headers.get("Retry-After", self.BACKOFF_BASE * (2 ** attempt))
+                    )
+                    retry_after = min(retry_after, self.MAX_RETRY_WAIT)
+                    time.sleep(retry_after)
+                    continue
+                error_body = e.read().decode("utf-8", errors="replace")
+                raise MattermostAPIError(e.code, error_body, url) from e
+        raise MattermostAPIError(429, "Rate limit exceeded after retries", url)
 
     def get_all_users(self, per_page: int = 200) -> list[dict]:
         """Fetch all users via paginated API calls. Returns list of user dicts."""

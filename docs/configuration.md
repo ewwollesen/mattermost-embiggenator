@@ -53,6 +53,8 @@ content:
   replies_per_thread: 1-5
   reaction_probability: 0.2
   reactions_per_post: 1-3
+  attachment_probability: 0.1        # fraction of posts that get a file attachment
+  attachment_size: 1024-5242880      # attachment size range in bytes (1 KB - 5 MB)
   direct_messages: 10-30
   dms_per_conversation: 3-10
 

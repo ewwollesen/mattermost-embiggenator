@@ -87,6 +87,9 @@ class ContentConfig:
     reaction_probability: float = 0.2
     reactions_per_post_min: int = 1
     reactions_per_post_max: int = 3
+    attachment_probability: float = 0.0
+    attachment_size_min: int = 1024  # 1 KB
+    attachment_size_max: int = 5 * 1024 * 1024  # 5 MB
     direct_messages_min: int = 10
     direct_messages_max: int = 30
     dms_per_conversation_min: int = 3
@@ -97,7 +100,7 @@ class ContentConfig:
             raise ValueError(
                 "channels_min and channels_max must both be set or both be None"
             )
-        for name in ("reply_probability", "reaction_probability", "private_channel_probability"):
+        for name in ("reply_probability", "reaction_probability", "private_channel_probability", "attachment_probability"):
             val = getattr(self, name)
             if not 0.0 <= val <= 1.0:
                 raise ValueError(f"{name} must be between 0.0 and 1.0, got {val}")
@@ -108,6 +111,7 @@ class ContentConfig:
             ("posts_per_channel_min", "posts_per_channel_max"),
             ("replies_per_thread_min", "replies_per_thread_max"),
             ("reactions_per_post_min", "reactions_per_post_max"),
+            ("attachment_size_min", "attachment_size_max"),
             ("direct_messages_min", "direct_messages_max"),
             ("dms_per_conversation_min", "dms_per_conversation_max"),
         ]
@@ -321,6 +325,14 @@ def _load_content_from_yaml(data: dict[str, Any]) -> ContentConfig:
         lo, hi = parse_range(ct["reactions_per_post"])
         cfg.reactions_per_post_min = lo
         cfg.reactions_per_post_max = hi
+
+    if "attachment_probability" in ct:
+        cfg.attachment_probability = float(ct["attachment_probability"])
+
+    if "attachment_size" in ct:
+        lo, hi = parse_range(ct["attachment_size"])
+        cfg.attachment_size_min = lo
+        cfg.attachment_size_max = hi
 
     if "direct_messages" in ct:
         lo, hi = parse_range(ct["direct_messages"])

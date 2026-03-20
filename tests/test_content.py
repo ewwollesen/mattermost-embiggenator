@@ -83,5 +83,56 @@ class TestPassageBank:
     def test_loads_bundled_texts(self):
         """Verify the real bundled text files can be loaded."""
         bank = PassageBank()
-        # Should have thousands of paragraphs from both books
+        # Should have thousands of paragraphs from all books
         assert bank.count > 1000
+
+    def test_generate_attachment_returns_bytes(self, bank):
+        rng = random.Random(42)
+        filename, data = bank.generate_attachment(rng, 1024)
+        assert isinstance(data, bytes)
+        assert len(data) == 1024
+        assert filename.endswith(".txt")
+
+    def test_generate_attachment_respects_target_size(self, bank):
+        rng = random.Random(42)
+        for target in [512, 4096, 10_000]:
+            _, data = bank.generate_attachment(rng, target)
+            assert len(data) == target
+
+    def test_generate_attachment_deterministic(self, bank):
+        rng1 = random.Random(99)
+        rng2 = random.Random(99)
+        name1, data1 = bank.generate_attachment(rng1, 2048)
+        name2, data2 = bank.generate_attachment(rng2, 2048)
+        assert name1 == name2
+        assert data1 == data2
+
+    def test_generate_attachment_uses_frankenstein(self, tmp_path):
+        """When a 'frankenstein' file exists, attachments draw from it."""
+        frank = tmp_path / "frankenstein.txt"
+        frank_paras = [
+            f"Frankenstein paragraph {i} with enough text to pass the minimum length filter."
+            for i in range(20)
+        ]
+        frank.write_text("\n\n".join(frank_paras))
+
+        other = tmp_path / "other.txt"
+        other_paras = [
+            f"Other paragraph {i} with enough text to pass the minimum length filter easily."
+            for i in range(20)
+        ]
+        other.write_text("\n\n".join(other_paras))
+
+        bank = PassageBank(text_dir=tmp_path)
+        rng = random.Random(42)
+        _, data = bank.generate_attachment(rng, 2048)
+        text = data.decode("utf-8", errors="replace")
+        assert "Frankenstein paragraph" in text
+        # Should NOT contain other book text
+        assert "Other paragraph" not in text
+
+    def test_generate_attachment_fallback_without_frankenstein(self, bank):
+        """Without a frankenstein file, attachments use all paragraphs."""
+        rng = random.Random(42)
+        _, data = bank.generate_attachment(rng, 1024)
+        assert len(data) == 1024

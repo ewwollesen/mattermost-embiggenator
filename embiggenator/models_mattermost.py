@@ -16,5 +16,6 @@ class ContentGenerationResult:
     posts_created: int = 0
     replies_created: int = 0
     reactions_added: int = 0
+    attachments_uploaded: int = 0
     dm_conversations: int = 0
     dm_messages: int = 0

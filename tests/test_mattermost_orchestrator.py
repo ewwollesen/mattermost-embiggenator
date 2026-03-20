@@ -246,6 +246,43 @@ class TestGenerateMattermostContent:
         assert first_call[0][1] == "important"
         assert first_call[0][3] == "P"
 
+    def test_creates_attachments(self, mock_client, user_map, passage_bank):
+        """With attachment_probability=1.0, every post gets an attachment."""
+        config = ContentConfig(
+            teams=[
+                TeamConfig(
+                    name="t",
+                    channels=[ChannelConfig(name="ch")],
+                    channels_per_team_min=1,
+                    channels_per_team_max=1,
+                ),
+            ],
+            posts_per_channel_min=5,
+            posts_per_channel_max=5,
+            attachment_probability=1.0,
+            attachment_size_min=512,
+            attachment_size_max=1024,
+            direct_messages_min=0,
+            direct_messages_max=0,
+        )
+        mock_client.upload_file.return_value = "file_001"
+        result = generate_mattermost_content(
+            mock_client, config, user_map, seed=42, passage_bank=passage_bank,
+        )
+        assert result.attachments_uploaded == 5
+        assert mock_client.upload_file.call_count == 5
+        # Verify file_ids were passed to create_post
+        for call in mock_client.create_post.call_args_list:
+            assert call.kwargs.get("file_ids") == ["file_001"] or call[1].get("file_ids") == ["file_001"]
+
+    def test_no_attachments_when_probability_zero(self, mock_client, small_content_config, user_map, passage_bank):
+        """Default attachment_probability=0.0 means no uploads."""
+        result = generate_mattermost_content(
+            mock_client, small_content_config, user_map, seed=42, passage_bank=passage_bank,
+        )
+        assert result.attachments_uploaded == 0
+        mock_client.upload_file.assert_not_called()
+
     def test_per_team_channel_count_override(self, mock_client, user_map, passage_bank):
         """Per-team channels_per_team overrides the global default."""
         config = ContentConfig(

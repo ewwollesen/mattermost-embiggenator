@@ -250,6 +250,20 @@ class TestContentConfig:
         assert cc.reply_probability == 0.0
         assert cc.reaction_probability == 1.0
 
+    def test_attachment_defaults(self):
+        cc = ContentConfig()
+        assert cc.attachment_probability == 0.0
+        assert cc.attachment_size_min == 1024
+        assert cc.attachment_size_max == 5 * 1024 * 1024
+
+    def test_attachment_probability_too_high(self):
+        with pytest.raises(ValueError, match="attachment_probability"):
+            ContentConfig(attachment_probability=1.5)
+
+    def test_attachment_size_inverted_raises(self):
+        with pytest.raises(ValueError, match="attachment_size"):
+            ContentConfig(attachment_size_min=5000, attachment_size_max=1000)
+
 
 class TestBuildConfigV2:
     def test_mattermost_from_yaml(self, tmp_path, monkeypatch):
@@ -366,3 +380,19 @@ class TestBuildConfigV2:
         assert cfg.mattermost.url == "http://localhost:8065"
         assert cfg.content.posts_per_channel_min == 20
         assert cfg.content.teams == []
+
+    def test_attachment_config_from_yaml(self, tmp_path):
+        config_data = {
+            "content": {
+                "attachment_probability": 0.15,
+                "attachment_size": "2048-1048576",
+                "teams": [{"name": "test"}],
+            },
+        }
+        config_file = tmp_path / "test.yaml"
+        config_file.write_text(yaml.dump(config_data))
+
+        cfg = build_config(config_file=str(config_file))
+        assert cfg.content.attachment_probability == 0.15
+        assert cfg.content.attachment_size_min == 2048
+        assert cfg.content.attachment_size_max == 1048576

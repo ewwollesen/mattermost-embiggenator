@@ -24,9 +24,13 @@ class PassageBank:
 
     def __init__(self, text_dir: Path | None = None) -> None:
         self._paragraphs: list[str] = []
+        self._attachment_paragraphs: list[str] = []
         text_dir = text_dir or _TEXTS_DIR
         for txt_file in sorted(text_dir.glob("*.txt")):
-            self._paragraphs.extend(_parse_paragraphs(txt_file))
+            paras = _parse_paragraphs(txt_file)
+            self._paragraphs.extend(paras)
+            if txt_file.stem == "frankenstein":
+                self._attachment_paragraphs = paras
         if not self._paragraphs:
             raise RuntimeError(f"No usable paragraphs found in {text_dir}")
         # Pre-filter short paragraphs for reply use
@@ -52,6 +56,33 @@ class PassageBank:
     def get_short_reply(self, rng: random.Random) -> str:
         """Return a single short paragraph suitable for a thread reply."""
         return rng.choice(self._short_paragraphs)
+
+
+    def generate_attachment(self, rng: random.Random, target_size: int) -> tuple[str, bytes]:
+        """Generate a text file of approximately target_size bytes.
+
+        Returns (filename, file_bytes). Uses the 'frankenstein' source if
+        available, otherwise falls back to all paragraphs.
+        """
+        pool = self._attachment_paragraphs or self._paragraphs
+        chunks: list[str] = []
+        current_size = 0
+        while current_size < target_size:
+            para = rng.choice(pool)
+            chunks.append(para)
+            current_size += len(para.encode("utf-8")) + 2  # +2 for \n\n separator
+
+        content = "\n\n".join(chunks)
+        # Trim to target size
+        content_bytes = content.encode("utf-8")[:target_size]
+        # Generate a plausible filename
+        nouns = [
+            "report", "notes", "draft", "memo", "summary", "review",
+            "proposal", "analysis", "document", "brief", "outline",
+            "minutes", "transcript", "findings", "assessment",
+        ]
+        name = f"{rng.choice(nouns)}_{rng.randint(1000, 9999)}.txt"
+        return name, content_bytes
 
 
 def _parse_paragraphs(path: Path) -> list[str]:

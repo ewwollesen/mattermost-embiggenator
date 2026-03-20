@@ -1,5 +1,6 @@
 # Embiggenator
 
+![Version 1.1.0](https://img.shields.io/badge/version-1.1.0-blue)
 ![Python >= 3.10](https://img.shields.io/badge/python-%3E%3D3.10-blue)
 ![License: MIT](https://img.shields.io/badge/license-MIT-green)
 
