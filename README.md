@@ -47,6 +47,10 @@ Built for the [`rroemhild/docker-test-openldap`](https://github.com/rroemhild/do
 | [Docker Compose](docs/docker-compose.md) | Volume mount and sidecar deployment examples |
 | [FAQ](docs/faq.md) | Troubleshooting, verification, objectClass notes |
 
+## Disclaimer
+
+Embiggenator is designed for local development and testing. Do not use it against production systems or on shared infrastructure where CLI arguments may be visible to other users. Sensitive values like `--pat` and `--bind-password` can be placed in a [YAML config file](docs/configuration.md) with restricted file permissions instead of passed on the command line.
+
 ## Acknowledgments
 
 - [Robin Roemhild](https://github.com/rroemhild) for the [`docker-test-openldap`](https://github.com/rroemhild/docker-test-openldap) image that Embiggenator is built around
