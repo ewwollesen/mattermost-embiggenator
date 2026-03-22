@@ -371,6 +371,126 @@ class TestGetMe:
         assert me["username"] == "admin"
 
 
+class TestGroupChannel:
+    def test_creates_group_channel(self, client):
+        mc, handler = client
+        handler.responses[("POST", "/api/v4/channels/group")] = (200, {"id": "gm123"})
+        ch_id = mc.create_group_channel(["user1", "user2", "user3"])
+        assert ch_id == "gm123"
+        _, _, body = handler.requests[0]
+        assert body == ["user1", "user2", "user3"]
+
+    def test_creates_group_channel_many_members(self, client):
+        mc, handler = client
+        handler.responses[("POST", "/api/v4/channels/group")] = (200, {"id": "gm456"})
+        user_ids = [f"user{i}" for i in range(7)]
+        ch_id = mc.create_group_channel(user_ids)
+        assert ch_id == "gm456"
+        _, _, body = handler.requests[0]
+        assert len(body) == 7
+
+
+class TestPinPost:
+    def test_pins_post(self, client):
+        mc, handler = client
+        handler.responses[("POST", "/api/v4/posts/")] = (200, {})
+        mc.pin_post("post123")
+        assert len(handler.requests) == 1
+        method, path, _ = handler.requests[0]
+        assert method == "POST"
+        assert "/posts/post123/pin" in path
+
+
+class TestCustomStatus:
+    def test_sets_custom_status(self, client):
+        mc, handler = client
+        handler.responses[("PUT", "/api/v4/users/")] = (200, {})
+        mc.set_custom_status("user1", "coffee", "On a break")
+        assert len(handler.requests) == 1
+        method, path, body = handler.requests[0]
+        assert method == "PUT"
+        assert "/users/user1/status/custom" in path
+        assert body["emoji"] == "coffee"
+        assert body["text"] == "On a break"
+
+    def test_sets_custom_status_with_token_override(self, client):
+        mc, handler = client
+        handler.responses[("PUT", "/api/v4/users/")] = (200, {})
+        mc.set_custom_status("user1", "palm_tree", "On vacation", token_override="user-token")
+        assert len(handler.requests) == 1
+
+
+class TestGetChannelByName:
+    def test_returns_channel(self, client):
+        mc, handler = client
+        handler.responses[("GET", "/api/v4/teams/")] = (200, {"id": "ch1", "name": "general"})
+        ch = mc.get_channel_by_name("team1", "general")
+        assert ch["id"] == "ch1"
+
+    def test_returns_none_for_404(self, client):
+        mc, handler = client
+        ch = mc.get_channel_by_name("team1", "nonexistent")
+        assert ch is None
+
+
+class TestGetOrCreateChannel:
+    def test_returns_existing(self, client):
+        mc, handler = client
+        handler.responses[("GET", "/api/v4/teams/")] = (200, {"id": "existing_ch"})
+        ch_id = mc.get_or_create_channel("team1", "general", "General")
+        assert ch_id == "existing_ch"
+        assert all(r[0] == "GET" for r in handler.requests)
+
+    def test_creates_when_missing(self, client):
+        mc, handler = client
+        handler.responses[("POST", "/api/v4/channels")] = (200, {"id": "new_ch"})
+        ch_id = mc.get_or_create_channel("team1", "backend", "Backend")
+        assert ch_id == "new_ch"
+
+
+class TestUploadFile:
+    def test_uploads_file(self, mock_server):
+        """Upload uses multipart encoding, so needs a handler that doesn't JSON-decode."""
+        url, handler = mock_server
+
+        original_handle = _MockHandler._handle
+
+        def _upload_handle(self_handler):
+            if self_handler.command == "POST" and "/files" in self_handler.path:
+                content_length = int(self_handler.headers.get("Content-Length", 0))
+                if content_length > 0:
+                    self_handler.rfile.read(content_length)  # consume body
+                self_handler.send_response(200)
+                self_handler.send_header("Content-Type", "application/json")
+                self_handler.end_headers()
+                self_handler.wfile.write(json.dumps({"file_infos": [{"id": "file123"}]}).encode())
+                return
+            original_handle(self_handler)
+
+        _MockHandler._handle = _upload_handle
+        _MockHandler.do_POST = _upload_handle
+        try:
+            mc = MattermostClient(url, "test-token")
+            file_id = mc.upload_file("ch1", "report.txt", b"Hello world")
+            assert file_id == "file123"
+        finally:
+            _MockHandler._handle = original_handle
+            _MockHandler.do_POST = original_handle
+
+
+class TestGetUserByUsername:
+    def test_returns_user(self, client):
+        mc, handler = client
+        handler.responses[("GET", "/api/v4/users/username/")] = (200, {"id": "u1", "username": "alice"})
+        user = mc.get_user_by_username("alice")
+        assert user["id"] == "u1"
+
+    def test_returns_none_for_404(self, client):
+        mc, handler = client
+        user = mc.get_user_by_username("nonexistent")
+        assert user is None
+
+
 class TestGetOrCreateRaceCondition:
     def test_team_conflict_retries_get(self, client):
         mc, handler = client

@@ -83,6 +83,18 @@ class TestBuildConfig:
         assert cfg.members_max == 10
         assert cfg.seed == 42
 
+    def test_cli_overrides_all_fields(self):
+        cfg = build_config(
+            base_dn="dc=cli,dc=test",
+            email_domain="cli.test",
+            default_password="clipass",
+            password_scheme="{SHA}",
+        )
+        assert cfg.base_dn == "dc=cli,dc=test"
+        assert cfg.email_domain == "cli.test"
+        assert cfg.default_password == "clipass"
+        assert cfg.password_scheme == "{SHA}"
+
     def test_yaml_config(self, tmp_path):
         config_data = {
             "users": 200,
@@ -464,3 +476,115 @@ class TestBuildConfigV2:
         cfg = build_config(config_file=str(config_file))
         assert cfg.content.pin_probability == 0.1
         assert cfg.content.status_probability == 0.8
+
+    def test_all_yaml_top_level_fields(self, tmp_path):
+        """Cover all top-level YAML fields that map to Config."""
+        config_data = {
+            "users": 200,
+            "groups": 15,
+            "members_per_group": "8-25",
+            "base_dn": "dc=test,dc=org",
+            "people_ou": "users",
+            "group_ou": "groups",
+            "email_domain": "test.org",
+            "default_password": "secret123",
+            "password_scheme": "{SHA}",
+            "seed": 77,
+            "include_defaults": False,
+        }
+        config_file = tmp_path / "test.yaml"
+        config_file.write_text(yaml.dump(config_data))
+
+        cfg = build_config(config_file=str(config_file))
+        assert cfg.users == 200
+        assert cfg.groups == 15
+        assert cfg.members_min == 8
+        assert cfg.members_max == 25
+        assert cfg.base_dn == "dc=test,dc=org"
+        assert cfg.people_ou == "users"
+        assert cfg.group_ou == "groups"
+        assert cfg.email_domain == "test.org"
+        assert cfg.default_password == "secret123"
+        assert cfg.password_scheme == "{SHA}"
+        assert cfg.seed == 77
+        assert cfg.include_defaults is False
+
+    def test_string_channel_shorthand_in_yaml(self, tmp_path):
+        """Channels can be specified as plain strings instead of dicts."""
+        config_data = {
+            "content": {
+                "teams": [
+                    {
+                        "name": "test-team",
+                        "channels": ["general", "random", "off-topic"],
+                    }
+                ],
+            },
+        }
+        config_file = tmp_path / "test.yaml"
+        config_file.write_text(yaml.dump(config_data))
+
+        cfg = build_config(config_file=str(config_file))
+        channels = cfg.content.teams[0].channels
+        assert len(channels) == 3
+        assert channels[0].name == "general"
+        assert channels[0].display_name == "General"  # auto-derived
+        assert channels[2].name == "off-topic"
+
+    def test_members_per_channel_from_yaml(self, tmp_path):
+        config_data = {
+            "content": {
+                "members_per_channel": "10-100",
+                "teams": [{"name": "test"}],
+            },
+        }
+        config_file = tmp_path / "test.yaml"
+        config_file.write_text(yaml.dump(config_data))
+
+        cfg = build_config(config_file=str(config_file))
+        assert cfg.content.members_per_channel_min == 10
+        assert cfg.content.members_per_channel_max == 100
+
+    def test_abac_profile_file(self, tmp_path):
+        """ABAC attributes loaded from a separate profile file."""
+        profile_data = {
+            "abac": {
+                "attributes": [
+                    {"name": "clearance", "values": ["Public", "Secret", "TopSecret"]},
+                ],
+            },
+        }
+        profile_file = tmp_path / "abac_profile.yaml"
+        profile_file.write_text(yaml.dump(profile_data))
+
+        cfg = build_config(abac_profile=str(profile_file))
+        attr_names = [a.name for a in cfg.abac_attributes]
+        assert "clearance" in attr_names
+
+    def test_group_dn_property(self):
+        cfg = Config(group_ou="groups", base_dn="dc=test,dc=org")
+        assert cfg.group_dn == "ou=groups,dc=test,dc=org"
+
+
+class TestAbacAttributeValidation:
+    def test_weights_sum_to_zero_raises(self):
+        with pytest.raises(ValueError, match="weights must sum to > 0"):
+            AbacAttribute(name="bad", values=["A", "B"], weights=[0, 0])
+
+    def test_weights_all_zero_raises(self):
+        with pytest.raises(ValueError, match="weights must sum to > 0"):
+            AbacAttribute(name="bad", values=["X"], weights=[0])
+
+
+class TestParseAbacInlineEdgeCases:
+    def test_trailing_semicolons_ignored(self):
+        """Trailing semicolons produce empty parts that should be skipped."""
+        result = parse_abac_inline("dept=Eng,Sales;")
+        assert len(result) == 1
+        assert result[0].name == "dept"
+
+    def test_whitespace_handling(self):
+        result = parse_abac_inline("  dept = Eng , Sales ; level = A , B  ")
+        assert len(result) == 2
+        assert result[0].values == ["Eng", "Sales"]
+        assert result[1].values == ["A", "B"]
