@@ -57,7 +57,7 @@ embiggenator populate [OPTIONS]
 
 ## `content`
 
-Generates Mattermost content against a running server. Requires users to already be logged in (via `populate --mattermost-url` or `run-all`).
+Generates Mattermost content against a running server: teams, channels, posts, threads, reactions, DMs, group messages, pinned posts, and custom user statuses. Requires users to already be logged in (via `populate --mattermost-url` or `run-all`).
 
 ```
 embiggenator content [OPTIONS]

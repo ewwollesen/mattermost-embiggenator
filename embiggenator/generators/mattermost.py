@@ -19,6 +19,30 @@ REACTION_EMOJIS = [
     "slightly_smiling_face", "grinning", "white_check_mark",
 ]
 
+# Custom status pool (emoji, text)
+_CUSTOM_STATUSES = [
+    ("calendar", "In a meeting"),
+    ("house", "Working from home"),
+    ("palm_tree", "On vacation"),
+    ("face_with_thermometer", "Out sick"),
+    ("hamburger", "Out for lunch"),
+    ("bus", "Commuting"),
+    ("headphones", "Heads down — focusing"),
+    ("speech_balloon", "Available to chat"),
+    ("airplane", "Traveling"),
+    ("book", "In training"),
+    ("coffee", "On a break"),
+    ("zzz", "Do not disturb"),
+    ("dart", "Sprinting"),
+    ("eyes", "Reviewing PRs"),
+    ("hammer_and_wrench", "On call"),
+    ("wave", "Be right back"),
+    ("hourglass", "In a long meeting"),
+    ("memo", "Writing docs"),
+    ("test_tube", "Running experiments"),
+    ("rocket", "Shipping features"),
+]
+
 # Word pools for auto-generated channel names (Mattermost requires lowercase alphanum + hyphens)
 _CHANNEL_PREFIXES = [
     "general", "random", "project", "dev", "ops", "design", "qa", "security",
@@ -264,10 +288,20 @@ def generate_mattermost_content(
                 )
                 result.posts_created += 1
                 all_post_ids.append((post_id, ch_info.channel_id, author_uid))
+
+                # Maybe pin this post
+                if content_config.pin_probability > 0 and rng.random() < content_config.pin_probability:
+                    try:
+                        client.pin_post(post_id)
+                        result.posts_pinned += 1
+                    except MattermostAPIError:
+                        pass
             except MattermostAPIError as e:
                 click.echo(f"    Warning: failed to create post in {ch_info.channel_name}: {e}")
 
     click.echo(f"  Posts created: {result.posts_created}")
+    if result.posts_pinned:
+        click.echo(f"  Posts pinned: {result.posts_pinned}")
     if result.attachments_uploaded:
         click.echo(f"  Attachments uploaded: {result.attachments_uploaded}")
 
@@ -376,6 +410,62 @@ def generate_mattermost_content(
                 pass
 
     click.echo(f"  DM conversations: {result.dm_conversations} ({result.dm_messages} messages)")
+
+    # ── Step 6: Generate group messages ──
+    if len(uids) >= 3:
+        n_group_convos = rng.randint(
+            content_config.group_messages_min,
+            content_config.group_messages_max,
+        )
+
+        for _ in range(n_group_convos):
+            n_members = rng.randint(
+                content_config.group_message_members_min,
+                min(content_config.group_message_members_max, len(uids)),
+            )
+            n_members = max(n_members, 3)
+            member_uids = rng.sample(uids, n_members)
+            member_mm_ids = [user_map[uid][0] for uid in member_uids]
+
+            try:
+                gm_channel_id = client.create_group_channel(member_mm_ids)
+            except MattermostAPIError:
+                continue
+
+            result.group_conversations += 1
+            n_messages = rng.randint(
+                content_config.group_messages_per_conversation_min,
+                content_config.group_messages_per_conversation_max,
+            )
+
+            for _ in range(n_messages):
+                sender_uid = rng.choice(member_uids)
+                _, token = user_map[sender_uid]
+                message = bank.get_short_reply(rng)
+                try:
+                    client.create_post(gm_channel_id, message, token_override=token)
+                    result.group_messages += 1
+                except MattermostAPIError:
+                    pass
+
+        click.echo(f"  Group conversations: {result.group_conversations} ({result.group_messages} messages)")
+    else:
+        click.echo(f"  Group conversations: 0 (need at least 3 users)")
+
+    # ── Step 7: Set custom statuses ──
+    if content_config.status_probability > 0:
+        for uid in uids:
+            if rng.random() >= content_config.status_probability:
+                continue
+            mm_user_id, token = user_map[uid]
+            emoji, text = rng.choice(_CUSTOM_STATUSES)
+            try:
+                client.set_custom_status(mm_user_id, emoji, text, token_override=token)
+                result.statuses_set += 1
+            except MattermostAPIError:
+                pass
+
+        click.echo(f"  Custom statuses set: {result.statuses_set}")
 
     return result
 

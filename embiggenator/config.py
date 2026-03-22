@@ -94,13 +94,21 @@ class ContentConfig:
     direct_messages_max: int = 30
     dms_per_conversation_min: int = 3
     dms_per_conversation_max: int = 10
+    group_messages_min: int = 5
+    group_messages_max: int = 15
+    group_message_members_min: int = 3
+    group_message_members_max: int = 7
+    group_messages_per_conversation_min: int = 5
+    group_messages_per_conversation_max: int = 15
+    pin_probability: float = 0.05
+    status_probability: float = 0.6
 
     def __post_init__(self) -> None:
         if (self.channels_min is None) != (self.channels_max is None):
             raise ValueError(
                 "channels_min and channels_max must both be set or both be None"
             )
-        for name in ("reply_probability", "reaction_probability", "private_channel_probability", "attachment_probability"):
+        for name in ("reply_probability", "reaction_probability", "private_channel_probability", "attachment_probability", "pin_probability", "status_probability"):
             val = getattr(self, name)
             if not 0.0 <= val <= 1.0:
                 raise ValueError(f"{name} must be between 0.0 and 1.0, got {val}")
@@ -114,6 +122,9 @@ class ContentConfig:
             ("attachment_size_min", "attachment_size_max"),
             ("direct_messages_min", "direct_messages_max"),
             ("dms_per_conversation_min", "dms_per_conversation_max"),
+            ("group_messages_min", "group_messages_max"),
+            ("group_message_members_min", "group_message_members_max"),
+            ("group_messages_per_conversation_min", "group_messages_per_conversation_max"),
         ]
         if self.channels_min is not None:
             _range_pairs.append(("channels_min", "channels_max"))
@@ -343,6 +354,27 @@ def _load_content_from_yaml(data: dict[str, Any]) -> ContentConfig:
         lo, hi = parse_range(ct["dms_per_conversation"])
         cfg.dms_per_conversation_min = lo
         cfg.dms_per_conversation_max = hi
+
+    if "group_messages" in ct:
+        lo, hi = parse_range(ct["group_messages"])
+        cfg.group_messages_min = lo
+        cfg.group_messages_max = hi
+
+    if "group_message_members" in ct:
+        lo, hi = parse_range(ct["group_message_members"])
+        cfg.group_message_members_min = lo
+        cfg.group_message_members_max = hi
+
+    if "group_messages_per_conversation" in ct:
+        lo, hi = parse_range(ct["group_messages_per_conversation"])
+        cfg.group_messages_per_conversation_min = lo
+        cfg.group_messages_per_conversation_max = hi
+
+    if "pin_probability" in ct:
+        cfg.pin_probability = float(ct["pin_probability"])
+
+    if "status_probability" in ct:
+        cfg.status_probability = float(ct["status_probability"])
 
     return cfg
 

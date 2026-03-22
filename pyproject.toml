@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "embiggenator"
-version = "1.1.0"
+version = "1.2.0"
 description = "LDAP test data and Mattermost content generator for Mattermost testing"
 requires-python = ">=3.10"
 license = "MIT"

@@ -264,6 +264,39 @@ class TestContentConfig:
         with pytest.raises(ValueError, match="attachment_size"):
             ContentConfig(attachment_size_min=5000, attachment_size_max=1000)
 
+    def test_group_messages_defaults(self):
+        cc = ContentConfig()
+        assert cc.group_messages_min == 5
+        assert cc.group_messages_max == 15
+        assert cc.group_message_members_min == 3
+        assert cc.group_message_members_max == 7
+        assert cc.group_messages_per_conversation_min == 5
+        assert cc.group_messages_per_conversation_max == 15
+
+    def test_group_messages_inverted_raises(self):
+        with pytest.raises(ValueError, match="group_messages"):
+            ContentConfig(group_messages_min=20, group_messages_max=5)
+
+    def test_group_message_members_inverted_raises(self):
+        with pytest.raises(ValueError, match="group_message_members"):
+            ContentConfig(group_message_members_min=10, group_message_members_max=3)
+
+    def test_pin_probability_defaults(self):
+        cc = ContentConfig()
+        assert cc.pin_probability == 0.05
+
+    def test_pin_probability_too_high(self):
+        with pytest.raises(ValueError, match="pin_probability"):
+            ContentConfig(pin_probability=1.5)
+
+    def test_status_probability_defaults(self):
+        cc = ContentConfig()
+        assert cc.status_probability == 0.6
+
+    def test_status_probability_negative(self):
+        with pytest.raises(ValueError, match="status_probability"):
+            ContentConfig(status_probability=-0.1)
+
 
 class TestBuildConfigV2:
     def test_mattermost_from_yaml(self, tmp_path, monkeypatch):
@@ -396,3 +429,38 @@ class TestBuildConfigV2:
         assert cfg.content.attachment_probability == 0.15
         assert cfg.content.attachment_size_min == 2048
         assert cfg.content.attachment_size_max == 1048576
+
+    def test_group_messages_from_yaml(self, tmp_path):
+        config_data = {
+            "content": {
+                "group_messages": "10-25",
+                "group_message_members": "3-8",
+                "group_messages_per_conversation": "4-12",
+                "teams": [{"name": "test"}],
+            },
+        }
+        config_file = tmp_path / "test.yaml"
+        config_file.write_text(yaml.dump(config_data))
+
+        cfg = build_config(config_file=str(config_file))
+        assert cfg.content.group_messages_min == 10
+        assert cfg.content.group_messages_max == 25
+        assert cfg.content.group_message_members_min == 3
+        assert cfg.content.group_message_members_max == 8
+        assert cfg.content.group_messages_per_conversation_min == 4
+        assert cfg.content.group_messages_per_conversation_max == 12
+
+    def test_pin_and_status_from_yaml(self, tmp_path):
+        config_data = {
+            "content": {
+                "pin_probability": 0.1,
+                "status_probability": 0.8,
+                "teams": [{"name": "test"}],
+            },
+        }
+        config_file = tmp_path / "test.yaml"
+        config_file.write_text(yaml.dump(config_data))
+
+        cfg = build_config(config_file=str(config_file))
+        assert cfg.content.pin_probability == 0.1
+        assert cfg.content.status_probability == 0.8

@@ -408,8 +408,8 @@ def content_cmd(config_file, pat, mattermost_url, seed, auto_yes, skip_verify_ss
             "or the MM_PAT environment variable."
         )
 
-    if not cfg.content.teams and cfg.content.direct_messages_min == 0:
-        raise click.ClickException("No content to generate. Define teams or DMs in your config.")
+    if not cfg.content.teams and cfg.content.direct_messages_min == 0 and cfg.content.group_messages_min == 0:
+        raise click.ClickException("No content to generate. Define teams, DMs, or group messages in your config.")
 
     click.echo(f"Connecting to Mattermost at {cfg.mattermost.url}...")
     client = MattermostClient(cfg.mattermost.url, cfg.mattermost.pat, verify_ssl=not skip_verify_ssl)
@@ -438,10 +438,13 @@ def content_cmd(config_file, pat, mattermost_url, seed, auto_yes, skip_verify_ss
     click.echo(f"  Teams: {result.teams_created}")
     click.echo(f"  Channels: {result.channels_created}")
     click.echo(f"  Posts: {result.posts_created}")
+    click.echo(f"  Posts pinned: {result.posts_pinned}")
     click.echo(f"  Attachments: {result.attachments_uploaded}")
     click.echo(f"  Replies: {result.replies_created}")
     click.echo(f"  Reactions: {result.reactions_added}")
     click.echo(f"  DM conversations: {result.dm_conversations} ({result.dm_messages} messages)")
+    click.echo(f"  Group conversations: {result.group_conversations} ({result.group_messages} messages)")
+    click.echo(f"  Custom statuses: {result.statuses_set}")
 
 
 @cli.command("run-all")
@@ -521,10 +524,13 @@ def run_all_cmd(
     click.echo(f"  Teams: {result.teams_created}")
     click.echo(f"  Channels: {result.channels_created}")
     click.echo(f"  Posts: {result.posts_created}")
+    click.echo(f"  Posts pinned: {result.posts_pinned}")
     click.echo(f"  Attachments: {result.attachments_uploaded}")
     click.echo(f"  Replies: {result.replies_created}")
     click.echo(f"  Reactions: {result.reactions_added}")
     click.echo(f"  DM conversations: {result.dm_conversations} ({result.dm_messages} messages)")
+    click.echo(f"  Group conversations: {result.group_conversations} ({result.group_messages} messages)")
+    click.echo(f"  Custom statuses: {result.statuses_set}")
 
 
 def _validate_pat(client: MattermostClient) -> None:
@@ -610,6 +616,11 @@ def show_config_cmd(config_file) -> None:
     click.echo(f"    attachment_size: {cfg.content.attachment_size_min}-{cfg.content.attachment_size_max}")
     click.echo(f"    direct_messages: {cfg.content.direct_messages_min}-{cfg.content.direct_messages_max}")
     click.echo(f"    dms_per_conversation: {cfg.content.dms_per_conversation_min}-{cfg.content.dms_per_conversation_max}")
+    click.echo(f"    group_messages: {cfg.content.group_messages_min}-{cfg.content.group_messages_max}")
+    click.echo(f"    group_message_members: {cfg.content.group_message_members_min}-{cfg.content.group_message_members_max}")
+    click.echo(f"    group_messages_per_conversation: {cfg.content.group_messages_per_conversation_min}-{cfg.content.group_messages_per_conversation_max}")
+    click.echo(f"    pin_probability: {cfg.content.pin_probability}")
+    click.echo(f"    status_probability: {cfg.content.status_probability}")
     if cfg.content.teams:
         click.echo("    teams:")
         for team in cfg.content.teams:

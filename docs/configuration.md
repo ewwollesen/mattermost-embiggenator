@@ -57,6 +57,11 @@ content:
   attachment_size: 1024-5242880      # attachment size range in bytes (1 KB - 5 MB)
   direct_messages: 10-30
   dms_per_conversation: 3-10
+  group_messages: 5-15               # number of group message conversations (3+ users)
+  group_message_members: 3-7         # members per group message
+  group_messages_per_conversation: 5-15
+  pin_probability: 0.05              # fraction of posts to pin to their channel
+  status_probability: 0.6            # fraction of users that get a custom status
 
   teams:
     - name: engineering

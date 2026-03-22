@@ -178,6 +178,11 @@ class MattermostClient:
         result = self._request("POST", "/channels/direct", [user_id_1, user_id_2])
         return result["id"]
 
+    def create_group_channel(self, user_ids: list[str]) -> str:
+        """Create (or get) a group message channel for 3+ users. Returns channel_id."""
+        result = self._request("POST", "/channels/group", user_ids)
+        return result["id"]
+
     # ── Team/Channel membership ──
 
     def add_user_to_team(self, team_id: str, user_id: str) -> None:
@@ -224,6 +229,12 @@ class MattermostClient:
         )
         return result["id"]
 
+    # ── Pinning ──
+
+    def pin_post(self, post_id: str) -> None:
+        """Pin a post to its channel."""
+        self._request("POST", f"/posts/{post_id}/pin")
+
     # ── Reactions ──
 
     def add_reaction(
@@ -251,6 +262,24 @@ class MattermostClient:
     def get_me(self) -> dict:
         """Get the authenticated user's profile. Returns user dict."""
         return self._request("GET", "/users/me")
+
+    # ── Custom status ──
+
+    def set_custom_status(
+        self,
+        user_id: str,
+        emoji: str,
+        text: str,
+        *,
+        token_override: str | None = None,
+    ) -> None:
+        """Set a user's custom status (emoji + text)."""
+        self._request(
+            "PUT",
+            f"/users/{user_id}/status/custom",
+            {"emoji": emoji, "text": text},
+            token_override=token_override,
+        )
 
     # ── Config ──
 

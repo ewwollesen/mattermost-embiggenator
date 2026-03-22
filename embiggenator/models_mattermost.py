@@ -19,3 +19,7 @@ class ContentGenerationResult:
     attachments_uploaded: int = 0
     dm_conversations: int = 0
     dm_messages: int = 0
+    group_conversations: int = 0
+    group_messages: int = 0
+    posts_pinned: int = 0
+    statuses_set: int = 0

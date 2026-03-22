@@ -264,6 +264,12 @@ class TestGenerateMattermostContent:
             attachment_size_max=1024,
             direct_messages_min=0,
             direct_messages_max=0,
+            group_messages_min=0,
+            group_messages_max=0,
+            reply_probability=0.0,
+            reaction_probability=0.0,
+            pin_probability=0.0,
+            status_probability=0.0,
         )
         mock_client.upload_file.return_value = "file_001"
         result = generate_mattermost_content(
@@ -271,7 +277,7 @@ class TestGenerateMattermostContent:
         )
         assert result.attachments_uploaded == 5
         assert mock_client.upload_file.call_count == 5
-        # Verify file_ids were passed to create_post
+        # Verify file_ids were passed to every create_post (only channel posts, no replies/group msgs)
         for call in mock_client.create_post.call_args_list:
             assert call.kwargs.get("file_ids") == ["file_001"] or call[1].get("file_ids") == ["file_001"]
 
@@ -305,6 +311,138 @@ class TestGenerateMattermostContent:
             mock_client, config, user_map, seed=42, passage_bank=passage_bank,
         )
         assert result.channels_created == 15  # per-team override, not global 3
+
+
+    def test_creates_group_messages(self, mock_client, user_map, passage_bank):
+        """Group messages should create group channels and post messages."""
+        config = ContentConfig(
+            teams=[],
+            direct_messages_min=0,
+            direct_messages_max=0,
+            group_messages_min=3,
+            group_messages_max=3,
+            group_message_members_min=3,
+            group_message_members_max=5,
+            group_messages_per_conversation_min=4,
+            group_messages_per_conversation_max=4,
+            status_probability=0.0,
+        )
+        mock_client.create_group_channel.return_value = "gm_001"
+        result = generate_mattermost_content(
+            mock_client, config, user_map, seed=42, passage_bank=passage_bank,
+        )
+        assert result.group_conversations == 3
+        assert result.group_messages == 12  # 3 convos * 4 messages
+        assert mock_client.create_group_channel.call_count == 3
+        # Verify each group channel call has 3-5 user IDs
+        for call in mock_client.create_group_channel.call_args_list:
+            user_ids = call[0][0]
+            assert 3 <= len(user_ids) <= 5
+
+    def test_no_group_messages_with_fewer_than_3_users(self, mock_client, passage_bank):
+        """Group messages require at least 3 users."""
+        two_user_map = {
+            "user0": ("mm_id_0", "token_0"),
+            "user1": ("mm_id_1", "token_1"),
+        }
+        config = ContentConfig(
+            teams=[],
+            direct_messages_min=0,
+            direct_messages_max=0,
+            group_messages_min=5,
+            group_messages_max=5,
+            status_probability=0.0,
+        )
+        result = generate_mattermost_content(
+            mock_client, config, two_user_map, seed=42, passage_bank=passage_bank,
+        )
+        assert result.group_conversations == 0
+        assert result.group_messages == 0
+
+    def test_no_group_messages_when_zero(self, mock_client, user_map, passage_bank):
+        """group_messages=0 means no group channels created."""
+        config = ContentConfig(
+            teams=[],
+            direct_messages_min=0,
+            direct_messages_max=0,
+            group_messages_min=0,
+            group_messages_max=0,
+            status_probability=0.0,
+        )
+        result = generate_mattermost_content(
+            mock_client, config, user_map, seed=42, passage_bank=passage_bank,
+        )
+        assert result.group_conversations == 0
+        mock_client.create_group_channel.assert_not_called()
+
+    def test_pins_posts(self, mock_client, user_map, passage_bank):
+        """With pin_probability=1.0, every post should be pinned."""
+        config = ContentConfig(
+            teams=[
+                TeamConfig(
+                    name="t",
+                    channels=[ChannelConfig(name="ch")],
+                    channels_per_team_min=1,
+                    channels_per_team_max=1,
+                ),
+            ],
+            posts_per_channel_min=5,
+            posts_per_channel_max=5,
+            pin_probability=1.0,
+            reply_probability=0.0,
+            reaction_probability=0.0,
+            direct_messages_min=0,
+            direct_messages_max=0,
+            group_messages_min=0,
+            group_messages_max=0,
+            status_probability=0.0,
+        )
+        result = generate_mattermost_content(
+            mock_client, config, user_map, seed=42, passage_bank=passage_bank,
+        )
+        assert result.posts_pinned == 5
+        assert mock_client.pin_post.call_count == 5
+
+    def test_no_pins_when_probability_zero(self, mock_client, small_content_config, user_map, passage_bank):
+        """Default pin_probability=0.05 — set to 0 to verify no pins."""
+        small_content_config.pin_probability = 0.0
+        result = generate_mattermost_content(
+            mock_client, small_content_config, user_map, seed=42, passage_bank=passage_bank,
+        )
+        assert result.posts_pinned == 0
+        mock_client.pin_post.assert_not_called()
+
+    def test_sets_custom_statuses(self, mock_client, user_map, passage_bank):
+        """With status_probability=1.0, every user gets a status."""
+        config = ContentConfig(
+            teams=[],
+            direct_messages_min=0,
+            direct_messages_max=0,
+            group_messages_min=0,
+            group_messages_max=0,
+            status_probability=1.0,
+        )
+        result = generate_mattermost_content(
+            mock_client, config, user_map, seed=42, passage_bank=passage_bank,
+        )
+        assert result.statuses_set == 10  # all 10 users
+        assert mock_client.set_custom_status.call_count == 10
+
+    def test_no_statuses_when_probability_zero(self, mock_client, user_map, passage_bank):
+        """status_probability=0.0 means no statuses set."""
+        config = ContentConfig(
+            teams=[],
+            direct_messages_min=0,
+            direct_messages_max=0,
+            group_messages_min=0,
+            group_messages_max=0,
+            status_probability=0.0,
+        )
+        result = generate_mattermost_content(
+            mock_client, config, user_map, seed=42, passage_bank=passage_bank,
+        )
+        assert result.statuses_set == 0
+        mock_client.set_custom_status.assert_not_called()
 
 
 class TestGenerateChannelConfigs:

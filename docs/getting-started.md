@@ -26,7 +26,7 @@ embiggenator run-all -c embiggenator.yaml \
 This:
 1. Adds generated users and groups to your LDAP server
 2. Logs each user into Mattermost (creating their accounts)
-3. Creates teams, channels, posts, threads, reactions, and DMs
+3. Creates teams, channels, posts, threads, reactions, DMs, group messages, pinned posts, and custom user statuses
 
 If `--pat` is not provided, content generation is skipped (steps 1-2 only).
 

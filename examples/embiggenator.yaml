@@ -45,3 +45,8 @@ content:
   attachment_size: 1024-5242880
   direct_messages: 10-30
   dms_per_conversation: 3-10
+  group_messages: 5-15
+  group_message_members: 3-7
+  group_messages_per_conversation: 5-15
+  pin_probability: 0.05
+  status_probability: 0.6

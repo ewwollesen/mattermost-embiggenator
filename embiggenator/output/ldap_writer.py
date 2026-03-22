@@ -71,7 +71,13 @@ def login_mattermost_users(
 
     logged_in = 0
     failed = 0
+    consecutive_failures = 0
     user_map: dict[str, tuple[str, str]] = {}
+
+    # If the first N logins all fail consecutively, something is systematically
+    # wrong (LDAP not synced, wrong password, server misconfigured). Bail early
+    # rather than hammering the server with hundreds of doomed requests.
+    max_consecutive_failures = 5
 
     for user in users:
         payload = json.dumps({"login_id": user.uid, "password": password}).encode("utf-8")
@@ -86,6 +92,7 @@ def login_mattermost_users(
             with urllib.request.urlopen(req) as resp:
                 if resp.status == 200:
                     logged_in += 1
+                    consecutive_failures = 0
                     if logged_in % 25 == 0:
                         click.echo(f"  Logged in {logged_in} users...")
                     token = resp.headers.get("Token", "")
@@ -95,11 +102,18 @@ def login_mattermost_users(
                         user_map[user.uid] = (mm_user_id, token)
         except urllib.error.HTTPError as e:
             failed += 1
+            consecutive_failures += 1
             if failed <= 3:
                 body = e.read().decode("utf-8", errors="replace")
                 click.echo(f"  Login failed for {user.uid}: HTTP {e.code} — {body}")
             elif failed == 4:
                 click.echo("  (suppressing further login errors)")
+            if consecutive_failures >= max_consecutive_failures and logged_in == 0:
+                click.echo(
+                    f"  Aborting logins: first {consecutive_failures} attempts all failed. "
+                    "Check that LDAP sync has completed and the password is correct."
+                )
+                break
         except urllib.error.URLError as e:
             failed += 1
             if failed == 1:
