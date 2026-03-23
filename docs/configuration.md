@@ -8,6 +8,7 @@ Options are resolved in priority order: **defaults < YAML config file < CLI flag
 - [Environment Variable Expansion](#environment-variable-expansion)
 - [Channel Distribution](#channel-distribution)
 - [Password Options](#password-options)
+- [Profile Pictures](#profile-pictures)
 
 ## YAML Config File
 
@@ -20,6 +21,7 @@ email_domain: planetexpress.com
 default_password: password
 password_scheme: "{SSHA}"
 seed: 42
+avatar_probability: 0.8             # fraction of users that get a jpegPhoto avatar
 
 # ABAC attributes for custom LDAP attribute testing
 abac:
@@ -153,3 +155,13 @@ Or via CLI flags:
 ```bash
 embiggenator generate-ldif --default-password mypass --password-scheme "{SHA}"
 ```
+
+## Profile Pictures
+
+Set `avatar_probability` to generate `jpegPhoto` attributes on LDAP users. Mattermost syncs these as profile pictures when `PictureAttribute` is set to `jpegPhoto` in LDAP settings (see [recommended settings](getting-started.md#recommended-mattermost-ldap-settings)).
+
+```yaml
+avatar_probability: 0.8   # 80% of users get a profile picture
+```
+
+The images are minimal solid-color 8x8 JPEGs (16 colors). They're small by design — they exist to test the LDAP photo sync pipeline, not to look realistic. The color assigned to each user is deterministic when using `seed`.

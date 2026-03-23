@@ -24,7 +24,7 @@ embiggenator run-all -c embiggenator.yaml \
 ```
 
 This:
-1. Adds generated users and groups to your LDAP server
+1. Adds generated users and groups to your LDAP server (with optional profile pictures via `jpegPhoto`)
 2. Logs each user into Mattermost (creating their accounts)
 3. Creates teams, channels, posts, threads, reactions, DMs, group messages, pinned posts, and custom user statuses
 
@@ -130,7 +130,8 @@ These settings work with the default Embiggenator configuration and the `rroemhi
     "NicknameAttribute": "givenName",
     "IdAttribute": "entryUUID",
     "PositionAttribute": "ou",
-    "LoginIdAttribute": "uid"
+    "LoginIdAttribute": "uid",
+    "PictureAttribute": "jpegPhoto"
   }
 }
 ```

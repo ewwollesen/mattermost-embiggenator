@@ -58,6 +58,29 @@ class TestGenerateUsers:
             assert u.extra_attributes["departmentNumber"] in ["Eng", "Sales"]
 
 
+    def test_avatar_probability_all(self):
+        cfg = Config(users=10, seed=42, avatar_probability=1.0)
+        users = generate_users(cfg)
+        for u in users:
+            assert u.jpeg_photo is not None
+            assert u.jpeg_photo[:2] == b"\xff\xd8"
+
+    def test_avatar_probability_none(self):
+        cfg = Config(users=10, seed=42, avatar_probability=0.0)
+        users = generate_users(cfg)
+        for u in users:
+            assert u.jpeg_photo is None
+
+    def test_avatar_reproducible_with_seed(self):
+        cfg1 = Config(users=10, seed=99, avatar_probability=0.5)
+        cfg2 = Config(users=10, seed=99, avatar_probability=0.5)
+        users1 = generate_users(cfg1)
+        users2 = generate_users(cfg2)
+        photos1 = [u.jpeg_photo for u in users1]
+        photos2 = [u.jpeg_photo for u in users2]
+        assert photos1 == photos2
+
+
 class TestGenerateGroups:
     def test_generates_correct_count(self):
         cfg = Config(users=20, groups=5, seed=42)

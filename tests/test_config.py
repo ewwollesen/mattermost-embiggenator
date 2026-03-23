@@ -566,6 +566,31 @@ class TestBuildConfigV2:
         assert cfg.group_dn == "ou=groups,dc=test,dc=org"
 
 
+class TestConfigAvatarProbability:
+    def test_default_zero(self):
+        cfg = Config()
+        assert cfg.avatar_probability == 0.0
+
+    def test_valid_value(self):
+        cfg = Config(avatar_probability=0.8)
+        assert cfg.avatar_probability == 0.8
+
+    def test_too_high_raises(self):
+        with pytest.raises(ValueError, match="avatar_probability"):
+            Config(avatar_probability=1.5)
+
+    def test_negative_raises(self):
+        with pytest.raises(ValueError, match="avatar_probability"):
+            Config(avatar_probability=-0.1)
+
+    def test_from_yaml(self, tmp_path):
+        config_data = {"users": 10, "avatar_probability": 0.75}
+        config_file = tmp_path / "test.yaml"
+        config_file.write_text(yaml.dump(config_data))
+        cfg = build_config(config_file=str(config_file))
+        assert cfg.avatar_probability == 0.75
+
+
 class TestAbacAttributeValidation:
     def test_weights_sum_to_zero_raises(self):
         with pytest.raises(ValueError, match="weights must sum to > 0"):

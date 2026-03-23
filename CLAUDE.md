@@ -42,6 +42,7 @@ Options merge in priority order: **defaults < YAML config < CLI flags**. The `bu
 - `generators/users.py` — Faker-based LDAP user generation with uid/cn uniqueness.
 - `generators/groups.py` — LDAP group generation with random member assignment.
 - `generators/abac.py` — ABAC attribute assignment (uniform or weighted).
+- `generators/avatar.py` — Embedded JPEG palette (16 solid-color 8x8 images) for LDAP `jpegPhoto` attributes. No runtime image library needed.
 - `generators/mattermost.py` — Content orchestrator: teams → channels → posts → replies → reactions → DMs → group messages → statuses. This is the largest module.
 - `generators/content.py` — `PassageBank` loads bundled literary texts and serves random passages for post content.
 - `output/mattermost_client.py` — Mattermost REST API client using stdlib urllib. Includes retry with backoff on 429.

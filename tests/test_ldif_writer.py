@@ -88,6 +88,28 @@ class TestLdifWriter:
         assert not (tmp_path / "00_people.ldif").exists()
         assert (tmp_path / "50_a_users.ldif").exists()
 
+    def test_jpeg_photo_base64_encoded(self, tmp_path):
+        cfg = Config(users=1, groups=0, seed=42, avatar_probability=1.0)
+        users = generate_users(cfg)
+        assert users[0].jpeg_photo is not None
+
+        write_ldif_files(users, [], tmp_path, include_defaults=False)
+
+        content = (tmp_path / "50_a_users.ldif").read_text()
+        # jpegPhoto should appear with :: (base64 encoding)
+        assert "jpegPhoto:: " in content
+        # Should NOT contain raw binary
+        assert b"\xff\xd8" not in content.encode("utf-8")
+
+    def test_no_jpeg_photo_when_none(self, tmp_path):
+        cfg = Config(users=1, groups=0, seed=42, avatar_probability=0.0)
+        users = generate_users(cfg)
+
+        write_ldif_files(users, [], tmp_path, include_defaults=False)
+
+        content = (tmp_path / "50_a_users.ldif").read_text()
+        assert "jpegPhoto" not in content
+
     def test_ldif_dn_format(self, tmp_path):
         cfg = Config(users=1, groups=0, seed=42)
         users = generate_users(cfg)

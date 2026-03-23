@@ -1,10 +1,10 @@
 # Embiggenator
 
-![Version 1.2.1](https://img.shields.io/badge/version-1.2.1-blue)
+![Version 1.3.0](https://img.shields.io/badge/version-1.3.0-blue)
 ![Python >= 3.10](https://img.shields.io/badge/python-%3E%3D3.10-blue)
 ![License: MIT](https://img.shields.io/badge/license-MIT-green)
 
-LDAP and Mattermost test data generator. Creates realistic test environments with hundreds or thousands of users, groups, teams, channels, conversations, group messages, pinned posts, and custom statuses -- all from a single config file.
+LDAP and Mattermost test data generator. Creates realistic test environments with hundreds or thousands of users, groups, teams, channels, conversations, group messages, pinned posts, custom statuses, and profile pictures -- all from a single config file.
 
 Built for the [`rroemhild/docker-test-openldap`](https://github.com/rroemhild/docker-test-openldap) Docker image.
 

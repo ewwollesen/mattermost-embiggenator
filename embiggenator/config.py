@@ -170,8 +170,15 @@ class Config:
     seed: int | None = None
     abac_attributes: list[AbacAttribute] = field(default_factory=list)
     include_defaults: bool = True
+    avatar_probability: float = 0.0
     mattermost: MattermostConfig = field(default_factory=MattermostConfig)
     content: ContentConfig = field(default_factory=ContentConfig)
+
+    def __post_init__(self) -> None:
+        if not 0.0 <= self.avatar_probability <= 1.0:
+            raise ValueError(
+                f"avatar_probability must be between 0.0 and 1.0, got {self.avatar_probability}"
+            )
 
     @property
     def people_dn(self) -> str:
@@ -426,6 +433,8 @@ def build_config(
             cfg.seed = int(yaml_data["seed"])
         if "include_defaults" in yaml_data:
             cfg.include_defaults = bool(yaml_data["include_defaults"])
+        if "avatar_probability" in yaml_data:
+            cfg.avatar_probability = float(yaml_data["avatar_probability"])
         cfg.abac_attributes.extend(load_abac_from_yaml(yaml_data))
 
         # New v2 sections

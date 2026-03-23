@@ -6,6 +6,7 @@ from faker import Faker
 
 from embiggenator.config import Config
 from embiggenator.generators.abac import assign_abac_attributes
+from embiggenator.generators.avatar import generate_avatar
 from embiggenator.models import GeneratedUser
 from embiggenator.utils import hash_password
 
@@ -59,6 +60,11 @@ def generate_users(config: Config) -> list[GeneratedUser]:
         # Assign ABAC attributes
         if config.abac_attributes:
             user.extra_attributes = assign_abac_attributes(config.abac_attributes, fake)
+
+        # Assign avatar
+        if config.avatar_probability > 0 and fake.random.random() < config.avatar_probability:
+            color_index = fake.random_int(min=0, max=15)
+            user.jpeg_photo = generate_avatar(color_index)
 
         seen_uids.add(uid)
         seen_cns.add(cn.lower())

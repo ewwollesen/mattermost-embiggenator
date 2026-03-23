@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import shutil
 from importlib import resources
 from pathlib import Path
@@ -41,10 +42,13 @@ def write_ldif_files(
             _write_entry(f, group.to_ldif_attrs())
 
 
-def _write_entry(f, attrs: list[tuple[str, str]]) -> None:
+def _write_entry(f, attrs: list[tuple[str, str | bytes]]) -> None:
     """Write a single LDIF entry."""
     for attr_name, attr_value in attrs:
-        if needs_base64(attr_value):
+        if isinstance(attr_value, bytes):
+            encoded = base64.b64encode(attr_value).decode("ascii")
+            line = f"{attr_name}:: {encoded}"
+        elif needs_base64(attr_value):
             encoded = base64_encode_value(attr_value)
             line = f"{attr_name}:: {encoded}"
         else:

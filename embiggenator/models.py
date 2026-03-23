@@ -20,14 +20,15 @@ class GeneratedUser:
     people_ou: str = "people"
     employee_number: str | None = None
     extra_attributes: dict[str, str] = field(default_factory=dict)
+    jpeg_photo: bytes | None = None
 
     @property
     def dn(self) -> str:
         return f"cn={_escape_dn_value(self.cn)},ou={self.people_ou},{self.base_dn}"
 
-    def to_ldif_attrs(self) -> list[tuple[str, str]]:
+    def to_ldif_attrs(self) -> list[tuple[str, str | bytes]]:
         """Return attribute tuples for LDIF output."""
-        attrs = [
+        attrs: list[tuple[str, str | bytes]] = [
             ("dn", self.dn),
             ("objectClass", "inetOrgPerson"),
             ("uid", self.uid),
@@ -42,6 +43,8 @@ class GeneratedUser:
             attrs.append(("employeeNumber", self.employee_number))
         for attr_name, attr_value in sorted(self.extra_attributes.items()):
             attrs.append((attr_name, attr_value))
+        if self.jpeg_photo is not None:
+            attrs.append(("jpegPhoto", self.jpeg_photo))
         return attrs
 
 

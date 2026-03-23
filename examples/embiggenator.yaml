@@ -5,6 +5,7 @@ email_domain: planetexpress.com
 default_password: password
 password_scheme: "{SSHA}"
 seed: 42
+avatar_probability: 0.8
 
 abac:
   attributes:

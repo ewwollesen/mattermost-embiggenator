@@ -259,9 +259,9 @@ def _fixup_group_objectclass(attrs: dict[str, list]) -> dict[str, list]:
     return attrs
 
 
-def _attrs_to_dict(attr_tuples: list[tuple[str, str]]) -> dict[str, list[str]]:
+def _attrs_to_dict(attr_tuples: list[tuple[str, str | bytes]]) -> dict[str, list[str | bytes]]:
     """Convert attribute tuples to a dict suitable for ldap3, skipping 'dn'."""
-    result: dict[str, list[str]] = {}
+    result: dict[str, list[str | bytes]] = {}
     for name, value in attr_tuples:
         if name == "dn":
             continue

@@ -590,6 +590,7 @@ def show_config_cmd(config_file) -> None:
     click.echo(f"  password_scheme:  {cfg.password_scheme}")
     click.echo(f"  seed:             {cfg.seed}")
     click.echo(f"  include_defaults: {cfg.include_defaults}")
+    click.echo(f"  avatar_probability: {cfg.avatar_probability}")
     if cfg.abac_attributes:
         click.echo("  abac_attributes:")
         for attr in cfg.abac_attributes:
