@@ -601,6 +601,38 @@ class TestAbacAttributeValidation:
             AbacAttribute(name="bad", values=["X"], weights=[0])
 
 
+class TestConfigAuthMethod:
+    def test_default_is_ldap(self):
+        cfg = Config()
+        assert cfg.auth_method == "ldap"
+
+    def test_email_valid(self):
+        cfg = Config(auth_method="email")
+        assert cfg.auth_method == "email"
+
+    def test_invalid_raises(self):
+        with pytest.raises(ValueError, match="auth_method"):
+            Config(auth_method="invalid")
+
+    def test_from_yaml(self, tmp_path):
+        config_data = {"users": 10, "auth_method": "email"}
+        config_file = tmp_path / "test.yaml"
+        config_file.write_text(yaml.dump(config_data))
+        cfg = build_config(config_file=str(config_file))
+        assert cfg.auth_method == "email"
+
+    def test_cli_override(self, tmp_path):
+        config_data = {"users": 10, "auth_method": "ldap"}
+        config_file = tmp_path / "test.yaml"
+        config_file.write_text(yaml.dump(config_data))
+        cfg = build_config(config_file=str(config_file), auth_method="email")
+        assert cfg.auth_method == "email"
+
+    def test_cli_override_without_yaml(self):
+        cfg = build_config(auth_method="email")
+        assert cfg.auth_method == "email"
+
+
 class TestParseAbacInlineEdgeCases:
     def test_trailing_semicolons_ignored(self):
         """Trailing semicolons produce empty parts that should be skipped."""

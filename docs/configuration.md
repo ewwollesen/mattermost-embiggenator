@@ -5,6 +5,7 @@ Options are resolved in priority order: **defaults < YAML config file < CLI flag
 ## Contents
 
 - [YAML Config File](#yaml-config-file)
+- [Auth Method](#auth-method)
 - [Environment Variable Expansion](#environment-variable-expansion)
 - [Channel Distribution](#channel-distribution)
 - [Password Options](#password-options)
@@ -13,7 +14,9 @@ Options are resolved in priority order: **defaults < YAML config file < CLI flag
 ## YAML Config File
 
 ```yaml
-# LDAP settings
+# auth_method: email  # "ldap" (default) or "email" (email/password, no LDAP needed)
+
+# LDAP settings (ignored when auth_method is "email")
 users: 500
 groups: 20
 members_per_group: 10-50
@@ -94,6 +97,27 @@ embiggenator generate-ldif -c embiggenator.yaml -u 50 -o ./embiggenator-data
 ```
 
 A working example config is at [`examples/embiggenator.yaml`](../examples/embiggenator.yaml).
+
+## Auth Method
+
+By default, Embiggenator creates users via LDAP (`auth_method: ldap`). If you don't have an LDAP server or want email/password accounts instead, use `auth_method: email`:
+
+```yaml
+auth_method: email
+```
+
+Or via CLI flag:
+
+```bash
+embiggenator run-all -c embiggenator.yaml --auth-method email --pat "$MM_PAT"
+```
+
+In email mode:
+- Users are created directly on Mattermost via `POST /api/v4/users` (email/password accounts)
+- A Mattermost PAT with system admin permissions is **required**
+- LDAP-specific features (groups, ABAC attributes, avatars, `password_scheme`) are skipped
+- The `users`, `email_domain`, and `default_password` settings work the same way
+- Content generation works identically once users are created
 
 ## Environment Variable Expansion
 

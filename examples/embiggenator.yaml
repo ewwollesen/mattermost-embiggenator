@@ -1,3 +1,4 @@
+# auth_method: email  # "ldap" (default) or "email" (email/password, no LDAP needed)
 users: 500
 groups: 20
 members_per_group: 10-50

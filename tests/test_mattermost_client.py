@@ -478,6 +478,75 @@ class TestUploadFile:
             _MockHandler.do_POST = original_handle
 
 
+class TestCreateUser:
+    def test_creates_user(self, client):
+        mc, handler = client
+        handler.responses[("POST", "/api/v4/users")] = (
+            200, {"id": "u1", "username": "alice", "email": "alice@test.com"},
+        )
+        result = mc.create_user("alice", "alice@test.com", "password123",
+                                first_name="Alice", last_name="Smith")
+        assert result["id"] == "u1"
+        _, _, body = handler.requests[0]
+        assert body["username"] == "alice"
+        assert body["email"] == "alice@test.com"
+        assert body["password"] == "password123"
+        assert body["first_name"] == "Alice"
+        assert body["last_name"] == "Smith"
+
+    def test_creates_user_minimal(self, client):
+        mc, handler = client
+        handler.responses[("POST", "/api/v4/users")] = (
+            200, {"id": "u2", "username": "bob"},
+        )
+        result = mc.create_user("bob", "bob@test.com", "pass")
+        assert result["id"] == "u2"
+        _, _, body = handler.requests[0]
+        assert "first_name" not in body
+        assert "last_name" not in body
+
+    def test_conflict_raises(self, client):
+        mc, handler = client
+        handler.responses[("POST", "/api/v4/users")] = (
+            409, {"message": "already exists"},
+        )
+        with pytest.raises(MattermostAPIError) as exc_info:
+            mc.create_user("alice", "alice@test.com", "pass")
+        assert exc_info.value.status == 409
+
+
+class TestLoginUser:
+    def test_login_returns_token(self, mock_server):
+        url, handler = mock_server
+
+        original_handle = _MockHandler._handle
+
+        def _login_handle(self_handler):
+            if self_handler.command == "POST" and "/users/login" in self_handler.path:
+                content_length = int(self_handler.headers.get("Content-Length", 0))
+                body = json.loads(self_handler.rfile.read(content_length)) if content_length else {}
+                self_handler.send_response(200)
+                self_handler.send_header("Content-Type", "application/json")
+                self_handler.send_header("Token", "session_abc123")
+                self_handler.end_headers()
+                self_handler.wfile.write(json.dumps({
+                    "id": "mm_alice", "username": body.get("login_id", ""),
+                }).encode())
+                return
+            original_handle(self_handler)
+
+        _MockHandler._handle = _login_handle
+        _MockHandler.do_POST = _login_handle
+        try:
+            mc = MattermostClient(url, "admin-token")
+            user_dict, token = mc.login_user("alice", "password")
+            assert user_dict["id"] == "mm_alice"
+            assert token == "session_abc123"
+        finally:
+            _MockHandler._handle = original_handle
+            _MockHandler.do_POST = original_handle
+
+
 class TestGetUserByUsername:
     def test_returns_user(self, client):
         mc, handler = client

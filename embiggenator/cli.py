@@ -46,6 +46,12 @@ _common_options = [
     click.option("--seed", type=int, default=None, help="Random seed for reproducible output"),
     click.option("--abac", "abac_inline", type=str, default=None, help="Inline ABAC: 'attr=val1,val2;attr2=val3,val4'"),
     click.option("--abac-profile", type=click.Path(exists=True), default=None, help="ABAC profile YAML file"),
+    click.option(
+        "--auth-method",
+        type=click.Choice(["ldap", "email"], case_sensitive=False),
+        default=None,
+        help="Auth method: 'ldap' (default) or 'email' (email/password, no LDAP needed)",
+    ),
 ]
 
 
@@ -79,7 +85,7 @@ def _build_config_and_generate(
     *,
     config_file, users, groups, members_per_group, base_dn, email_domain,
     default_password, password_scheme, seed, abac_inline, abac_profile,
-    no_defaults=False,
+    no_defaults=False, auth_method=None,
 ) -> tuple[Config, list[GeneratedUser], list[GeneratedGroup]]:
     """Build config and run generation (shared by generate-ldif and populate)."""
     cfg = build_config(
@@ -95,7 +101,14 @@ def _build_config_and_generate(
         abac_inline=abac_inline,
         abac_profile=abac_profile,
         no_defaults=no_defaults,
+        auth_method=auth_method,
     )
+
+    if cfg.auth_method == "email":
+        click.echo(f"Generating {cfg.users} users (email auth, skipping LDAP groups)...")
+        generated_users = generate_users(cfg)
+        click.echo(f"Generated {len(generated_users)} users")
+        return cfg, generated_users, []
 
     click.echo(f"Generating {cfg.users} users and {cfg.groups} groups...")
     generated_users = generate_users(cfg)
@@ -120,9 +133,12 @@ def _build_config_and_generate(
 def generate_ldif_cmd(
     output_dir, no_defaults, config_file, users, groups, members_per_group,
     base_dn, email_domain, default_password, password_scheme, seed,
-    abac_inline, abac_profile,
+    abac_inline, abac_profile, auth_method,
 ) -> None:
     """Generate LDIF files to mount into the OpenLDAP container."""
+    if auth_method and auth_method.lower() == "email":
+        raise click.ClickException("generate-ldif is only for LDAP auth. Use 'populate --auth-method email' instead.")
+
     cfg, generated_users, generated_groups = _build_config_and_generate(
         config_file=config_file, users=users, groups=groups,
         members_per_group=members_per_group, base_dn=base_dn, email_domain=email_domain,
@@ -141,22 +157,50 @@ def generate_ldif_cmd(
 @_add_common_options
 @_add_ldap_options
 @click.option("--mattermost-url", type=str, default=None, help="Mattermost server URL to log users in and activate accounts")
+@click.option("--pat", type=str, default=None, help="Mattermost Personal Access Token (required for --auth-method email)")
 @click.option("--nologin", is_flag=True, default=False, help="Skip Mattermost login (only populate LDAP)")
+@click.option("--skip-verify-ssl", is_flag=True, default=False, help="Skip TLS certificate verification (for self-signed certs)")
 def populate_cmd(
     host, port, bind_dn, bind_password, use_ssl,
-    mattermost_url, nologin,
+    mattermost_url, pat, nologin, skip_verify_ssl,
     config_file, users, groups, members_per_group, base_dn, email_domain,
     default_password, password_scheme, seed, abac_inline, abac_profile,
+    auth_method,
 ) -> None:
-    """Populate a running LDAP server with generated entries."""
-    from embiggenator.output.ldap_writer import login_mattermost_users, populate_ldap
+    """Populate a running LDAP server with generated entries.
 
+    With --auth-method email, skips LDAP and creates users directly on
+    Mattermost via the REST API (requires --pat).
+    """
     cfg, generated_users, generated_groups = _build_config_and_generate(
         config_file=config_file, users=users, groups=groups,
         members_per_group=members_per_group, base_dn=base_dn, email_domain=email_domain,
         default_password=default_password, password_scheme=password_scheme,
         seed=seed, abac_inline=abac_inline, abac_profile=abac_profile,
+        auth_method=auth_method,
     )
+
+    if pat:
+        cfg.mattermost.pat = pat
+    if mattermost_url:
+        cfg.mattermost.url = mattermost_url
+
+    if cfg.auth_method == "email":
+        from embiggenator.output.mattermost_client import MattermostClient
+        from embiggenator.output.mattermost_writer import create_local_users
+
+        if not cfg.mattermost.pat:
+            raise click.ClickException(
+                "Mattermost PAT is required for email auth. "
+                "Set it via --pat, config YAML (mattermost.pat), or MM_PAT env var."
+            )
+        click.echo(f"Creating email/password users on Mattermost at {cfg.mattermost.url}...")
+        client = MattermostClient(cfg.mattermost.url, cfg.mattermost.pat, verify_ssl=not skip_verify_ssl)
+        _validate_pat(client)
+        create_local_users(generated_users, client, cfg.default_password)
+        return
+
+    from embiggenator.output.ldap_writer import login_mattermost_users, populate_ldap
 
     populate_ldap(
         generated_users,
@@ -386,8 +430,8 @@ def update_user_cmd(host, port, bind_dn, bind_password, use_ssl, base_dn, userna
 def content_cmd(config_file, pat, mattermost_url, seed, auto_yes, skip_verify_ssl) -> None:
     """Generate Mattermost content (teams, channels, posts, threads, reactions, DMs).
 
-    Requires a running Mattermost server with LDAP users already logged in.
-    Uses the PAT (Personal Access Token) for API authentication.
+    Requires a running Mattermost server with users already created (via LDAP
+    or email auth). Uses the PAT (Personal Access Token) for API authentication.
 
     Note: All API actions are performed using the admin PAT, so Mattermost will
     attribute posts/reactions to the PAT owner. For realistic per-user authorship,
@@ -459,14 +503,15 @@ def run_all_cmd(
     mattermost_url, pat, auto_yes, skip_verify_ssl,
     config_file, users, groups, members_per_group, base_dn, email_domain,
     default_password, password_scheme, seed, abac_inline, abac_profile,
+    auth_method,
 ) -> None:
-    """Run everything: populate LDAP, login users, generate Mattermost content.
+    """Run everything: populate LDAP (or create local users), login users, generate content.
 
     This is the all-in-one command for setting up a complete test environment.
+    Use --auth-method email to skip LDAP and create email/password accounts directly.
     """
     from embiggenator.generators.content import PassageBank
     from embiggenator.generators.mattermost import generate_mattermost_content, preflight_check_max_users_per_team
-    from embiggenator.output.ldap_writer import login_mattermost_users, populate_ldap
     from embiggenator.output.mattermost_client import MattermostClient
 
     cfg, generated_users, generated_groups = _build_config_and_generate(
@@ -474,6 +519,7 @@ def run_all_cmd(
         members_per_group=members_per_group, base_dn=base_dn, email_domain=email_domain,
         default_password=default_password, password_scheme=password_scheme,
         seed=seed, abac_inline=abac_inline, abac_profile=abac_profile,
+        auth_method=auth_method,
     )
 
     if pat:
@@ -481,36 +527,56 @@ def run_all_cmd(
     if mattermost_url:
         cfg.mattermost.url = mattermost_url
 
-    # Step 1: Populate LDAP
-    click.echo("\n=== Step 1: Populate LDAP ===")
-    populate_ldap(
-        generated_users,
-        generated_groups,
-        host=host,
-        port=port,
-        bind_dn=bind_dn or f"cn=admin,{cfg.base_dn}",
-        bind_password=bind_password or "GoodNewsEveryone",
-        use_ssl=use_ssl,
-    )
-
-    # Step 2: Login users to Mattermost
     mm_url = cfg.mattermost.url
-    click.echo(f"\n=== Step 2: Login users to Mattermost at {mm_url} ===")
-    user_map = login_mattermost_users(generated_users, mm_url, cfg.default_password)
+
+    if cfg.auth_method == "email":
+        # Email auth: create users via the Mattermost API (no LDAP needed)
+        if not cfg.mattermost.pat:
+            raise click.ClickException(
+                "Mattermost PAT is required for email auth. "
+                "Set it via --pat, config YAML (mattermost.pat), or MM_PAT env var."
+            )
+
+        click.echo(f"\n=== Step 1: Create email/password users on Mattermost at {mm_url} ===")
+        client = MattermostClient(mm_url, cfg.mattermost.pat, verify_ssl=not skip_verify_ssl)
+        _validate_pat(client)
+
+        from embiggenator.output.mattermost_writer import create_local_users
+
+        user_map = create_local_users(generated_users, client, cfg.default_password)
+    else:
+        # LDAP auth: populate LDAP then login users
+        from embiggenator.output.ldap_writer import login_mattermost_users, populate_ldap
+
+        click.echo("\n=== Step 1: Populate LDAP ===")
+        populate_ldap(
+            generated_users,
+            generated_groups,
+            host=host,
+            port=port,
+            bind_dn=bind_dn or f"cn=admin,{cfg.base_dn}",
+            bind_password=bind_password or "GoodNewsEveryone",
+            use_ssl=use_ssl,
+        )
+
+        click.echo(f"\n=== Step 2: Login users to Mattermost at {mm_url} ===")
+        user_map = login_mattermost_users(generated_users, mm_url, cfg.default_password)
 
     if not user_map:
         click.echo("Warning: no users were logged in. Skipping content generation.")
         return
 
-    # Step 3: Generate content
+    # Generate content
     if not cfg.mattermost.pat:
         click.echo("Warning: no PAT configured. Skipping content generation.")
         click.echo("Set PAT via --pat, config YAML, or MM_PAT env var to enable content generation.")
         return
 
-    click.echo("\n=== Step 3: Generate Mattermost content ===")
-    client = MattermostClient(mm_url, cfg.mattermost.pat, verify_ssl=not skip_verify_ssl)
-    _validate_pat(client)
+    step_num = "2" if cfg.auth_method == "email" else "3"
+    click.echo(f"\n=== Step {step_num}: Generate Mattermost content ===")
+    if cfg.auth_method != "email":
+        client = MattermostClient(mm_url, cfg.mattermost.pat, verify_ssl=not skip_verify_ssl)
+        _validate_pat(client)
 
     if cfg.content.teams:
         preflight_check_max_users_per_team(client, len(user_map), auto_yes=auto_yes)
@@ -579,6 +645,7 @@ def show_config_cmd(config_file) -> None:
     """Show the resolved configuration."""
     cfg = build_config(config_file=config_file)
     click.echo("Resolved configuration:")
+    click.echo(f"  auth_method:      {cfg.auth_method}")
     click.echo(f"  users:            {cfg.users}")
     click.echo(f"  groups:           {cfg.groups}")
     click.echo(f"  members_per_group: {cfg.members_min}-{cfg.members_max}")

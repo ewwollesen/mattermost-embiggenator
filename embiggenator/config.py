@@ -171,10 +171,15 @@ class Config:
     abac_attributes: list[AbacAttribute] = field(default_factory=list)
     include_defaults: bool = True
     avatar_probability: float = 0.0
+    auth_method: str = "ldap"
     mattermost: MattermostConfig = field(default_factory=MattermostConfig)
     content: ContentConfig = field(default_factory=ContentConfig)
 
     def __post_init__(self) -> None:
+        if self.auth_method not in ("ldap", "email"):
+            raise ValueError(
+                f"auth_method must be 'ldap' or 'email', got '{self.auth_method}'"
+            )
         if not 0.0 <= self.avatar_probability <= 1.0:
             raise ValueError(
                 f"avatar_probability must be between 0.0 and 1.0, got {self.avatar_probability}"
@@ -401,6 +406,7 @@ def build_config(
     abac_profile: str | None = None,
     no_defaults: bool = False,
     pat: str | None = None,
+    auth_method: str | None = None,
 ) -> Config:
     """Build a Config by merging defaults < YAML file < CLI overrides."""
     cfg = Config()
@@ -433,6 +439,8 @@ def build_config(
             cfg.seed = int(yaml_data["seed"])
         if "include_defaults" in yaml_data:
             cfg.include_defaults = bool(yaml_data["include_defaults"])
+        if "auth_method" in yaml_data:
+            cfg.auth_method = yaml_data["auth_method"]
         if "avatar_probability" in yaml_data:
             cfg.avatar_probability = float(yaml_data["avatar_probability"])
         cfg.abac_attributes.extend(load_abac_from_yaml(yaml_data))
@@ -464,6 +472,8 @@ def build_config(
         cfg.include_defaults = False
     if pat is not None:
         cfg.mattermost.pat = pat
+    if auth_method is not None:
+        cfg.auth_method = auth_method
 
     # ABAC: use custom attributes if any are specified, otherwise use defaults
     custom_abac: list[AbacAttribute] = []

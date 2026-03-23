@@ -379,6 +379,57 @@ class MattermostClient:
                 raise MattermostAPIError(e.code, error_body, url) from e
         raise MattermostAPIError(429, "Rate limit exceeded after retries", url)
 
+    def create_user(
+        self,
+        username: str,
+        email: str,
+        password: str,
+        *,
+        first_name: str = "",
+        last_name: str = "",
+    ) -> dict:
+        """Create an email/password Mattermost user via POST /api/v4/users. Returns user dict."""
+        body: dict[str, str] = {
+            "username": username,
+            "email": email,
+            "password": password,
+        }
+        if first_name:
+            body["first_name"] = first_name
+        if last_name:
+            body["last_name"] = last_name
+        return self._request("POST", "/users", body)
+
+    def login_user(self, login_id: str, password: str) -> tuple[dict, str]:
+        """Log in a user via POST /api/v4/users/login.
+
+        Returns (user_dict, session_token).
+        """
+        url = f"{self.base_url}/api/v4/users/login"
+        data = json.dumps({"login_id": login_id, "password": password}).encode("utf-8")
+
+        for attempt in range(self.MAX_RETRIES + 1):
+            req = urllib.request.Request(
+                url,
+                data=data,
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            try:
+                with urllib.request.urlopen(req, context=self._ssl_context) as resp:
+                    token = resp.headers.get("Token", "")
+                    body = json.loads(resp.read().decode("utf-8"))
+                    return body, token
+            except urllib.error.HTTPError as e:
+                if e.code == 429 and attempt < self.MAX_RETRIES:
+                    retry_after = float(e.headers.get("Retry-After", self.BACKOFF_BASE * (2 ** attempt)))
+                    retry_after = min(retry_after, self.MAX_RETRY_WAIT)
+                    time.sleep(retry_after)
+                    continue
+                error_body = e.read().decode("utf-8", errors="replace")
+                raise MattermostAPIError(e.code, error_body, url) from e
+        raise MattermostAPIError(429, "Rate limit exceeded after retries", url)
+
     def get_all_users(self, per_page: int = 200) -> list[dict]:
         """Fetch all users via paginated API calls. Returns list of user dicts."""
         all_users: list[dict] = []
